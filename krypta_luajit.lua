@@ -1,0 +1,450 @@
+#!/usr/bin/env luajit
+
+--[[
+	*CHANGE the SEED* to something you can easily remember.
+	For example your e-mail, your mobile phone number or your date of birth.
+	It can be fairly obvious info, known to people around you but
+	it must be specific to you personally,
+	so it SHOULD NOT be e.g. the name of your pet or your favorite food or color.
+]]
+local SEED = "" --Put the SEED between the quotes.
+local DIFFICULTY = 0 --Put desired difficulty here
+local CHECKSUM = 0x12345678 --Put checksum here
+
+--RSA256 implementation from https://github.com/JustAPerson/LuaCrypt/
+
+local bxor, band, bor, ror, rol, tohex, tobit, bnot, rshift, lshift = bit.bxor, bit.band, bit.bor, bit.ror, bit.rol, bit.tohex, bit.tobit, bit.bnot, bit.rshift, bit.lshift
+
+local function dwords_to_chars(ns)
+	local res = {}
+	for ndw, dword in ipairs(ns) do
+		for i = 1,4 do
+			dword = rol(dword,8)
+			table.insert(res, string.char(band(0xff, dword)))
+		end
+	end
+	return table.concat(res)
+end
+
+local function to_bin(n)
+	local res = {}
+	for i = 1,32 do
+		n = rol(n,1)
+		res[i] = band(n,1)
+	end
+	return table.concat(res)
+end
+
+--- Round constants
+-- computed as the fractional parts of the cuberoots of the first 64 primes
+local k256 = {
+   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+   0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+   0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+   0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+   0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+   0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+   0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+   0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+   0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+   0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+   0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+   0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+   0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+   0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+   0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+   0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+}
+
+--- Preprocess input message
+local function preprocess256(input)
+	local length = #input;	-- length in bits
+	local padding = 64 - ((length + 9) % 64);
+	input = input .. "\128" .. ("\0"):rep(padding) .. "\0\0\0\0";
+	local l = length * 8
+	for i = 1, 4 do
+		l = rol(l, 8)
+		input = input .. string.char(band(l,0xff))
+	end
+	return input
+end
+
+--- Process an individual block using SHA256
+-- Note: Lua arrays start at 1, not 0.
+--       This behavior is respected in loop counters.
+--
+--@param `input` is the original input message
+--@param `t` is the position of the first byte of this block
+--@param `H` is the internal hash state
+local function digest_block256(input, t, H)
+	local s10	-- Using 1 var for s0,s1 to help LuaJIT register alloc
+	local t1, t2
+	local chmaj	-- May be used in place of s0
+	local word
+	local a, b, c, d, e, f, g, h
+	local k = k256
+
+	local limit = 2^32
+
+	local W = {}
+	local chunk
+	local c1 = 0	-- #W, #words
+	chunk = input:sub(t, t + 63)
+	c1 = 0
+	for i = 1, 64, 4 do
+		c1 = c1 + 1;
+		local num = 0
+		for j = 0, 3 do
+			num = rol(num, 8)
+			num = bor(num, string.byte(chunk:sub(i+j, i+j)))
+		end
+		W[c1] = num
+	end
+
+	-- Extend 16 words into 64
+	for t = 17, 64 do
+		word  = W[t - 2]
+		s10   = bxor(ror(word, 17), ror(word, 19), rshift(word, 10))
+		word  = W[t - 15]
+		chmaj = bxor(ror(word, 7), ror(word, 18), rshift(word, 3))
+		W[t]  = s10 + W[t - 7] + chmaj + W[t - 16]
+	end
+
+	a, b, c, d = H[1], H[2], H[3], H[4];
+	e, f, g, h = H[5], H[6], H[7], H[8];
+
+	for t = 1, 64 do
+		s10   = bxor(ror(e, 6), ror(e, 11), ror(e, 25));
+		chmaj = bxor(band(e, f), band(bnot(e), g));
+		t1    = h + s10 + chmaj + k[t] + W[t];
+		s10   = bxor(ror(a, 2), ror(a, 13), ror(a, 22));
+		chmaj = bxor(band(a, b), band(a, c), band(b, c));
+		t2    = s10 + chmaj;
+		h = g;
+		g = f;
+		f = e;
+		e = d  + t1;
+		d = c;
+		c = b;
+		b = a;
+		a = t1 + t2;
+	end
+
+	H[1] = (a + H[1]) % limit;
+	H[2] = (b + H[2]) % limit;
+	H[3] = (c + H[3]) % limit;
+	H[4] = (d + H[4]) % limit;
+	H[5] = (e + H[5]) % limit;
+	H[6] = (f + H[6]) % limit;
+	H[7] = (g + H[7]) % limit;
+	H[8] = (h + H[8]) % limit;
+end
+
+local function hex256(dwords, separator)
+	assert(#dwords == 8)
+	separator = separator or ""
+	assert(type(separator)=="string")
+	local res = {}
+	for i = 1, 8 do
+		res[i] = tohex(dwords[i])
+	end
+	return table.concat(res,separator)
+end
+
+--- Calculate the SHA256 digest of a message
+-- Note: sha256() does not use variable names complaint with FIPS 180-2
+--@param `input` the message
+local function sha256(input, format)
+	input  = preprocess256(input);
+	local state  = {
+		0x6a09e667,
+		0xbb67ae85,
+		0x3c6ef372,
+		0xa54ff53a,
+		0x510e527f,
+		0x9b05688c,
+		0x1f83d9ab,
+		0x5be0cd19,
+	}
+
+	for i = 1, #input, 64 do
+		digest_block256(input, i, state);
+	end
+
+	if format == "dwords" then
+		return state
+	end
+
+	return hex256(state)
+end
+
+local new_shifter = function(state)
+	if tobit(state) == 0 then
+		state = 1
+	end
+	local fun = function(arg)
+		if arg=="dump" then
+			return (state)
+		end
+		local bt = band(state,1)
+		state = ror(state,1)
+		if bt == 1 then
+			state = bxor(state, 0xa3000000)
+			return true
+		end
+		return false
+	end
+	return fun
+	-- A3000000 = 1010 0011 0000 0000 0000 0000 0000 0000 - 32,30,26,25
+end
+
+local new_random = function(dwords) ---Not txt...
+	local w,x,y,z = dwords[1],dwords[2],dwords[3],dwords[4]
+	local sh1, sh2, sh3, sh4 = new_shifter(dwords[5]), new_shifter(dwords[6]), new_shifter(dwords[7]), new_shifter(dwords[8])
+
+	if bit.bor(w,x,y,z) == 0 then --Cannot be all zeroes!
+		w,x,y,z = 0,0,0,1
+	end
+	local fun = function(arg) --Xorshift algorithm
+		if arg=="dump" then
+			return{w,x,y,z, sh1("dump"), sh2("dump"), sh3("dump"), sh4("dump")}
+		end
+		repeat
+			local t = bxor(x, lshift(x,11))
+			x,y,z = y,z,w
+			w = bit.bxor(w, rshift(w,19), t, rshift(t,8))
+		until sh1() or sh2() or sh3() or sh4() --Shifters depend on each other
+		return w
+	end
+	for i = 1, 10 do
+		fun()
+	end
+	return fun
+end
+
+local function keymaster(seedstring, difc, progress)
+	local prgfnc = function() end
+	local iterations = 0x100000
+	if progress then
+		local prg = "012345abcdefghijklmnopqrstuvwxyz012345ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		local progressbar = {}
+		for i = 1, 64 do
+			progressbar[i] = prg:sub(i,i)
+		end
+		io.write("Progress: ")
+		local mask = rshift(iterations - 1,6)
+		local count = 1
+		prgfnc = function(x)
+			if band(x,mask) == 0 then
+				io.write(string.format(progressbar[count]))
+				io.flush()
+				if count == 64 then
+					print()
+				end
+				count = count + 1
+			end
+		end
+	end
+	local rnd = new_random(sha256(seedstring, "dwords"))
+	local difmask = bit.rshift(0xffffffff, 32-difc)
+	local t0 = os.time()
+	for i = 0, iterations - 1 do
+		prgfnc(i)
+		local seek = band(difmask, rnd())
+		--print("looking for "..tohex(seek))
+		repeat
+			local got = band(difmask,rnd())
+		until got == seek
+	end
+	return rnd("dump"), os.time()-t0
+end
+
+local function calibrate()
+	for difc = 1, 32 do
+		print("Trying difficulty "..difc)
+		local got, time = keymaster("Xuul",difc,true)
+		print()
+		print("Time = "..time)
+		if time >= 10 then
+			print("\nCALIBRATION RESULTS FOR THIS MACHINE:")
+			for d = difc, 32 do
+				local t = time
+				local ts = t.." seconds"
+				if t > 180 then
+					t = math.floor(t/60)
+					ts = t.. " minutes"
+					if t > 180 then
+						t = math.floor(t / 60)
+						ts = t.." hours"
+						if t > 72 then
+							t = math.floor( t / 24)
+							ts = t.." days"
+							if t > 1000 then
+								math.floor(t / 365)
+								ts = t.." years"
+							end
+						end
+					end
+				end
+				print("Difficulty "..d.." takes approx. "..ts..".")
+
+				time = time * 2
+			end
+			return
+		end
+	end
+end
+
+local function get256bits(rand)
+	local dwords = {}
+	for i = 1, 8 do
+		local dword = 0
+		for j = 1, 32 do
+			local got = rand()
+			local bitsel = band(got, 0xf) --bit 0-15
+			dword = rol(dword,1)
+			dword = bor(dword, band(1,ror(got, bitsel + 8)))
+		end
+		dwords[i] = dword
+	end
+	return dwords
+end
+
+local function test()
+	assert(to_bin(7)=="00000000000000000000000000000111")
+	assert(dwords_to_chars({0x41424344,0x31323334}) == "ABCD1234")
+	assert(sha256("") == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+	assert(sha256("The quick brown fox jumps over the lazy dog") == "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592")
+	local sh = new_shifter(0x12345678)
+	for i = 1, 100 do
+		sh()
+	end
+	assert(sh("dump") == 0x28f5d58d)
+
+	local rnd0 = new_random{0,0,0,1,1,1,1,1}
+	for i = 1, 990 do
+		rnd0()
+	end
+	local dump = rnd0("dump")
+	for i,val in ipairs({0xa45d7858, 0x60b7932e, 0x9c0ded0f, 0xee518a23, 0x03715fcb, 0x302fe72e, 0x06dd5f19, 0x32c1d489}) do
+		assert(tobit(val) == tobit(dump[i]), "bad "..i)
+	end
+	assert(hex256(get256bits(rnd0),"/") == "6a9ff9da/154b2aec/156fa973/5699eef0/2efda6da/e5388e2a/21651355/8ccf4893")
+
+	assert(hex256(keymaster("Satan",2),"-") == "b04be3c2-aaee42e6-6caddeb0-d75814d6-333f5fd4-2f70b73b-11194cb5-0d6703b8")
+
+end
+
+local function parse_options()
+	local allowed = {"difficulty", "seed", "test", "checksum"}
+	for i, opt in ipairs(allowed) do
+		allowed[opt] = true
+	end
+
+	local opts = {}
+	for i, arg in ipairs(arg) do
+		if arg:match("=") then
+			local opt, val = arg:match("(.-)=(.+)")
+			assert(opt and val)
+			assert(#opt > 0)
+			assert(#val > 0)
+			opts[opt] = val
+		else
+			opts[arg] = true
+		end
+	end
+	for k,v in pairs(opts) do
+		if not allowed[k] then
+			error("Invalid option: "..k.."="..tostring(v))
+		end
+	end
+	return opts
+end
+
+local function main()
+	local opts = parse_options()
+	if opts.test then
+		test()
+		print("All self-tests OK")
+		os.exit()
+	end
+
+	if opts.seed then
+		SEED = opts.seed
+	end
+
+	if SEED == "" then
+		SEED = nil
+	end
+
+	if opts.difficulty then
+		DIFFICULTY = tonumber(opts.difficulty)
+	end
+
+	if DIFFICULTY < 0 or DIFFICULTY > 32 or (DIFFICULTY ~= math.floor(DIFFICULTY)) then
+		error("Invalid difficulty: "..DIFFICULTY)
+	end
+
+	if DIFFICULTY == 0 then
+		print("Difficulty not set, calibrating...")
+		calibrate()
+		os.exit()
+	end
+
+	if not SEED then
+		error("'seed' is not set. Set it in the source or on commandline.")
+	end
+
+	if CHECKSUM == 0x12345678 then
+		CHECKSUM = nil
+	end
+
+	CHECKSUM = CHECKSUM or tonumber(opts.checksum)
+
+	print("STARTING!")
+	test()
+	print("Seed='"..SEED.."' ("..#SEED.." characters)")
+	if not CHECKSUM then
+		print("Checksum not set, will display it.")
+	end
+	print("Please enter your super-secret MASTER PASSPHRASE:")
+	local masterpp = io.read()
+	print("Please enter it again:")
+	local masterpp2 = io.read()
+	assert(masterpp == masterpp2, "Passphrase mismatch")
+	for i = 1, 200 do
+		print("")
+	end
+	if #masterpp < 10 then
+		print("WARNING: Master passphrase is very short.")
+	end
+
+	local zeroes = dwords_to_chars{0}
+	local masterseed = masterpp..zeroes..SEED
+	print("Calculating master key at difficulty "..DIFFICULTY)
+	local masterkey = keymaster(masterseed, DIFFICULTY, true)
+	print("Masterkey generated.")
+	local chsum = bxor(masterkey[1],masterkey[2],masterkey[8])
+	if CHECKSUM then
+		if tobit(CHECKSUM) ~= tobit(chsum) then
+			print("!!! CHECKSUMS DO NOT MATCH !!!")
+			error("nomatch")
+		else
+			print("Checksum matches.")
+		end
+	else
+		print("Masterkey checksum is: 0x"..tohex(chsum))
+	end
+	print(hex256(masterkey," "))
+	local seed0 = dwords_to_chars(masterkey)
+	while true do
+		print("Enter index (default='0')")
+		local index = io.read() or "0"
+		local rnd = new_random(sha256(index..zeroes..seed0,"dwords"))
+		local result = get256bits(rnd)
+		assert(#result == 8)
+		print(hex256(result))
+	end
+end
+
+main()
