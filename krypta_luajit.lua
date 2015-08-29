@@ -181,6 +181,7 @@ local function sha256(input, format)
 
 	return hex256(state)
 end
+----- END SHA256
 
 local new_shifter = function(state)
 	if tobit(state) == 0 then
@@ -226,7 +227,7 @@ local new_random = function(dwords) ---Not txt...
 	return fun
 end
 
-local function keymaster(SALTstring, difc, progress)
+local function keymaster(seedstring, difc, progress)
 	local prgfnc = function() end
 	local iterations = 0x100000
 	if progress then
@@ -249,7 +250,8 @@ local function keymaster(SALTstring, difc, progress)
 			end
 		end
 	end
-	local rnd = new_random(sha256(SALTstring, "dwords"))
+
+	local rnd = new_random(sha256(seedstring, "dwords"))
 	local difmask = bit.rshift(0xffffffff, 32-difc)
 	local t0 = os.time()
 	for i = 0, iterations - 1 do
@@ -424,9 +426,9 @@ local function main()
 	end
 
 	local zeroes = dwords_to_chars{0}
-	local masterSALT = masterpp..zeroes..SALT
+	local masterseed = masterpp..zeroes..SALT
 	print("Calculating master key at difficulty "..DIFFICULTY)
-	local mastrnd,time = keymaster(masterSALT, DIFFICULTY, true)
+	local mastrnd,time = keymaster(masterseed, DIFFICULTY, true)
 	print("Masterkey generated in "..time.." seconds.")
 	local masterstat = mastrnd("dump")
 	local chsum = bxor(masterstat[1],masterstat[2],masterstat[8])
@@ -442,11 +444,11 @@ local function main()
 	end
 	local masterkey = get256bits(mastrnd)
 	print(hex256(masterkey," "))
-	local SALT0 = dwords_to_chars(masterkey)
+	local seed0 = dwords_to_chars(masterkey)
 	while true do
 		print("Enter index (default='0')")
 		local index = io.read() or "0"
-		local rnd = new_random(sha256(index..zeroes..SALT0,"dwords"))
+		local rnd = new_random(sha256(index..zeroes..seed0,"dwords"))
 		local result = get256bits(rnd)
 		assert(#result == 8)
 		print(hex256(result))
