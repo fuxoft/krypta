@@ -1,13 +1,13 @@
 #!/usr/bin/env luajit
 
 --[[
-	*CHANGE the SEED* to something you can easily remember.
+	*CHANGE the SALT* to something you can easily remember.
 	For example your e-mail, your mobile phone number or your date of birth.
 	It can be fairly obvious info, known to people around you but
 	it must be specific to you personally,
 	so it SHOULD NOT be e.g. the name of your pet or your favorite food or color.
 ]]
-local SEED = "" --Put the SEED between the quotes.
+local SALT = "" --Put the SALT between the quotes.
 local DIFFICULTY = 0 --Put desired difficulty here
 local CHECKSUM = 0x12345678 --Put checksum here
 
@@ -130,14 +130,18 @@ local function digest_block256(input, t, H)
 		a = t1 + t2;
 	end
 
-	H[1] = (a + H[1]) % limit;
-	H[2] = (b + H[2]) % limit;
-	H[3] = (c + H[3]) % limit;
-	H[4] = (d + H[4]) % limit;
-	H[5] = (e + H[5]) % limit;
-	H[6] = (f + H[6]) % limit;
-	H[7] = (g + H[7]) % limit;
-	H[8] = (h + H[8]) % limit;
+	H[1] = (a + H[1])
+	H[2] = (b + H[2])
+	H[3] = (c + H[3])
+	H[4] = (d + H[4])
+	H[5] = (e + H[5])
+	H[6] = (f + H[6])
+	H[7] = (g + H[7])
+	H[8] = (h + H[8])
+	for i = 1, 8 do
+		H[i] = band(H[i],0xffffffff)
+	end
+
 end
 
 local function hex256(dwords, separator)
@@ -195,7 +199,7 @@ local new_shifter = function(state)
 		return false
 	end
 	return fun
-	-- A3000000 = 1010 0011 0000 0000 0000 0000 0000 0000 - 32,30,26,25
+	-- A3000000 = 1010 0011 0000 0000 0000 0000 0000 0000 - bits 32,30,26,25
 end
 
 local new_random = function(dwords) ---Not txt...
@@ -222,7 +226,7 @@ local new_random = function(dwords) ---Not txt...
 	return fun
 end
 
-local function keymaster(seedstring, difc, progress)
+local function keymaster(SALTstring, difc, progress)
 	local prgfnc = function() end
 	local iterations = 0x100000
 	if progress then
@@ -245,7 +249,7 @@ local function keymaster(seedstring, difc, progress)
 			end
 		end
 	end
-	local rnd = new_random(sha256(seedstring, "dwords"))
+	local rnd = new_random(sha256(SALTstring, "dwords"))
 	local difmask = bit.rshift(0xffffffff, 32-difc)
 	local t0 = os.time()
 	for i = 0, iterations - 1 do
@@ -256,13 +260,13 @@ local function keymaster(seedstring, difc, progress)
 			local got = band(difmask,rnd())
 		until got == seek
 	end
-	return rnd("dump"), os.time()-t0
+	return rnd, os.time()-t0
 end
 
 local function calibrate()
 	for difc = 1, 32 do
 		print("Trying difficulty "..difc)
-		local got, time = keymaster("Xuul",difc,true)
+		local gotrnd, time = keymaster("Xuul",difc,true)
 		print()
 		print("Time = "..time)
 		if time >= 10 then
@@ -331,12 +335,12 @@ local function test()
 	end
 	assert(hex256(get256bits(rnd0),"/") == "6a9ff9da/154b2aec/156fa973/5699eef0/2efda6da/e5388e2a/21651355/8ccf4893")
 
-	assert(hex256(keymaster("Satan",2),"-") == "b04be3c2-aaee42e6-6caddeb0-d75814d6-333f5fd4-2f70b73b-11194cb5-0d6703b8")
+	assert(hex256(keymaster("Satan",2)("dump"),"-") == "b04be3c2-aaee42e6-6caddeb0-d75814d6-333f5fd4-2f70b73b-11194cb5-0d6703b8")
 
 end
 
 local function parse_options()
-	local allowed = {"difficulty", "seed", "test", "checksum"}
+	local allowed = {"difficulty", "salt", "test", "checksum"}
 	for i, opt in ipairs(allowed) do
 		allowed[opt] = true
 	end
@@ -369,12 +373,12 @@ local function main()
 		os.exit()
 	end
 
-	if opts.seed then
-		SEED = opts.seed
+	if opts.salt then
+		SALT = opts.salt
 	end
 
-	if SEED == "" then
-		SEED = nil
+	if SALT == "" then
+		SALT = nil
 	end
 
 	if opts.difficulty then
@@ -391,8 +395,8 @@ local function main()
 		os.exit()
 	end
 
-	if not SEED then
-		error("'seed' is not set. Set it in the source or on commandline.")
+	if not SALT then
+		error("'salt' is not set. Set it in the source or on commandline.")
 	end
 
 	if CHECKSUM == 0x12345678 then
@@ -403,7 +407,7 @@ local function main()
 
 	print("STARTING!")
 	test()
-	print("Seed='"..SEED.."' ("..#SEED.." characters)")
+	print("SALT='"..SALT.."' ("..#SALT.." characters)")
 	if not CHECKSUM then
 		print("Checksum not set, will display it.")
 	end
@@ -420,11 +424,12 @@ local function main()
 	end
 
 	local zeroes = dwords_to_chars{0}
-	local masterseed = masterpp..zeroes..SEED
+	local masterSALT = masterpp..zeroes..SALT
 	print("Calculating master key at difficulty "..DIFFICULTY)
-	local masterkey = keymaster(masterseed, DIFFICULTY, true)
-	print("Masterkey generated.")
-	local chsum = bxor(masterkey[1],masterkey[2],masterkey[8])
+	local mastrnd,time = keymaster(masterSALT, DIFFICULTY, true)
+	print("Masterkey generated in "..time.." seconds.")
+	local masterstat = mastrnd("dump")
+	local chsum = bxor(masterstat[1],masterstat[2],masterstat[8])
 	if CHECKSUM then
 		if tobit(CHECKSUM) ~= tobit(chsum) then
 			print("!!! CHECKSUMS DO NOT MATCH !!!")
@@ -435,12 +440,13 @@ local function main()
 	else
 		print("Masterkey checksum is: 0x"..tohex(chsum))
 	end
+	local masterkey = get256bits(mastrnd)
 	print(hex256(masterkey," "))
-	local seed0 = dwords_to_chars(masterkey)
+	local SALT0 = dwords_to_chars(masterkey)
 	while true do
 		print("Enter index (default='0')")
 		local index = io.read() or "0"
-		local rnd = new_random(sha256(index..zeroes..seed0,"dwords"))
+		local rnd = new_random(sha256(index..zeroes..SALT0,"dwords"))
 		local result = get256bits(rnd)
 		assert(#result == 8)
 		print(hex256(result))
