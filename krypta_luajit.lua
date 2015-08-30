@@ -269,8 +269,8 @@ local function calibrate()
 	for difc = 1, 32 do
 		print("Trying difficulty "..difc)
 		local gotrnd, time = keymaster("Xuul",difc,true)
+		print("Seconds: "..time)
 		print()
-		print("Time = "..time)
 		if time >= 10 then
 			print("\nCALIBRATION RESULTS FOR THIS MACHINE:")
 			for d = difc, 32 do
@@ -286,7 +286,7 @@ local function calibrate()
 							t = math.floor( t / 24)
 							ts = t.." days"
 							if t > 1000 then
-								math.floor(t / 365)
+								t = math.floor(t / 365)
 								ts = t.." years"
 							end
 						end
@@ -432,23 +432,22 @@ local function main()
 	print("Masterkey generated in "..time.." seconds.")
 	local masterstat = mastrnd("dump")
 	local chsum = bxor(masterstat[1],masterstat[2],masterstat[8])
+	print("Masterkey checksum is: 0x"..tohex(chsum))
 	if CHECKSUM then
 		if tobit(CHECKSUM) ~= tobit(chsum) then
-			print("!!! CHECKSUMS DO NOT MATCH !!!")
+			print("!!! CHECKSUM DOES NOT MATCH !!!")
 			error("nomatch")
 		else
 			print("Checksum matches.")
 		end
-	else
-		print("Masterkey checksum is: 0x"..tohex(chsum))
 	end
 	local masterkey = get256bits(mastrnd)
-	print(hex256(masterkey," "))
-	local seed0 = dwords_to_chars(masterkey)
+	--print("-masterkey- "..hex256(masterkey," "))
+	local strseed0 = dwords_to_chars(masterkey)
 	while true do
 		print("Enter index (default='0')")
 		local index = io.read() or "0"
-		local rnd = new_random(sha256(index..zeroes..seed0,"dwords"))
+		local rnd = new_random(sha256(index..zeroes..strseed0,"dwords"))
 		local result = get256bits(rnd)
 		assert(#result == 8)
 		print(hex256(result))
