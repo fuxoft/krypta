@@ -26,6 +26,21 @@ local function dwords_to_chars(ns)
 	return table.concat(res)
 end
 
+local function get256bits(rand)
+	local dwords = {}
+	for i = 1, 8 do
+		local dword = 0
+		for j = 1, 32 do
+			local got = rand()
+			local bitsel = band(got, 0xf) --bit 0-15
+			dword = rol(dword,1)
+			dword = bor(dword, band(1,ror(got, bitsel + 8)))
+		end
+		dwords[i] = dword
+	end
+	return dwords
+end
+
 local function to_bin(n)
 	local res = {}
 	for i = 1,32 do
@@ -192,7 +207,7 @@ local new_shifter = function(state)
 			return (state)
 		end
 		local bt = band(state,1)
-		state = ror(state,1)
+		state = rshift(state,1)
 		if bt == 1 then
 			state = bxor(state, 0xa3000000)
 			return true
@@ -262,7 +277,8 @@ local function keymaster(seedstring, difc, progress)
 			local got = band(difmask,rnd())
 		until got == seek
 	end
-	return rnd, os.time()-t0
+	local master = get256bits(rnd)
+	return master, os.time()-t0
 end
 
 local function calibrate()
@@ -301,21 +317,6 @@ local function calibrate()
 	end
 end
 
-local function get256bits(rand)
-	local dwords = {}
-	for i = 1, 8 do
-		local dword = 0
-		for j = 1, 32 do
-			local got = rand()
-			local bitsel = band(got, 0xf) --bit 0-15
-			dword = rol(dword,1)
-			dword = bor(dword, band(1,ror(got, bitsel + 8)))
-		end
-		dwords[i] = dword
-	end
-	return dwords
-end
-
 local function test()
 	assert(to_bin(7)=="00000000000000000000000000000111")
 	assert(dwords_to_chars({0x41424344,0x31323334}) == "ABCD1234")
@@ -325,20 +326,19 @@ local function test()
 	for i = 1, 100 do
 		sh()
 	end
-	assert(sh("dump") == 0x28f5d58d)
+	assert(tobit(sh("dump")) == tobit(0x8d8aa8c3))
 
 	local rnd0 = new_random{0,0,0,1,1,1,1,1}
 	for i = 1, 990 do
 		rnd0()
 	end
 	local dump = rnd0("dump")
-	for i,val in ipairs({0xa45d7858, 0x60b7932e, 0x9c0ded0f, 0xee518a23, 0x03715fcb, 0x302fe72e, 0x06dd5f19, 0x32c1d489}) do
+	for i,val in ipairs({0xe69e4882, 0x993ecb5d, 0xba4f982f, 0x0bafb5d9, 0x46c10ce6, 0x033a2504, 0x1e202557, 0xeb54cd93}) do
 		assert(tobit(val) == tobit(dump[i]), "bad "..i)
 	end
-	assert(hex256(get256bits(rnd0),"/") == "6a9ff9da/154b2aec/156fa973/5699eef0/2efda6da/e5388e2a/21651355/8ccf4893")
+	assert(tohex(rnd0())=="8995132f")
 
-	assert(hex256(keymaster("Satan",2)("dump"),"-") == "b04be3c2-aaee42e6-6caddeb0-d75814d6-333f5fd4-2f70b73b-11194cb5-0d6703b8")
-
+	assert(hex256(keymaster("Satan",2),"-") == "fa33bc46-33732eca-2fb42099-570eb3b0-b47464a8-31229bd1-630c2002-61bef559")
 end
 
 local function parse_options()
@@ -428,10 +428,9 @@ local function main()
 	local zeroes = dwords_to_chars{0}
 	local masterseed = masterpp..zeroes..SALT
 	print("Calculating master key at difficulty "..DIFFICULTY)
-	local mastrnd,time = keymaster(masterseed, DIFFICULTY, true)
+	local masterkey,time = keymaster(masterseed, DIFFICULTY, true)
 	print("Masterkey generated in "..time.." seconds.")
-	local masterstat = mastrnd("dump")
-	local chsum = bxor(masterstat[1],masterstat[2],masterstat[8])
+	local chsum = bxor(masterkey[1],masterkey[7],masterkey[8])
 	print("Masterkey checksum is: 0x"..tohex(chsum))
 	if CHECKSUM then
 		if tobit(CHECKSUM) ~= tobit(chsum) then
@@ -441,7 +440,6 @@ local function main()
 			print("Checksum matches.")
 		end
 	end
-	local masterkey = get256bits(mastrnd)
 	--print("-masterkey- "..hex256(masterkey," "))
 	local strseed0 = dwords_to_chars(masterkey)
 	while true do
