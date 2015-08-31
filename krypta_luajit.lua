@@ -379,10 +379,6 @@ local function main()
 		SALT = opts.salt
 	end
 
-	if SALT == "" then
-		SALT = nil
-	end
-
 	if opts.difficulty then
 		DIFFICULTY = tonumber(opts.difficulty)
 	end
@@ -397,10 +393,6 @@ local function main()
 		os.exit()
 	end
 
-	if not SALT then
-		error("'salt' is not set. Set it in the source or on commandline.")
-	end
-
 	if CHECKSUM == 0x12345678 then
 		CHECKSUM = nil
 	end
@@ -410,6 +402,11 @@ local function main()
 	print("STARTING!")
 	test()
 	print("SALT='"..SALT.."' ("..#SALT.." characters)")
+	assert(type(SALT) == "string", "SALT is not string")
+	if #SALT == 0 then
+		print("WARNING! 'SALT' is not set. Set it to be more secure.")
+	end
+
 	if not CHECKSUM then
 		print("Checksum not set, will display it.")
 	end
