@@ -13,6 +13,8 @@ local CHECKSUM = 0x12345678 --Put checksum here
 
 --RSA256 implementation from https://github.com/JustAPerson/LuaCrypt/
 
+local MAXDIFC = 31
+
 local bxor, band, bor, ror, rol, tohex, tobit, bnot, rshift, lshift = bit.bxor, bit.band, bit.bor, bit.ror, bit.rol, bit.tohex, bit.tobit, bit.bnot, bit.rshift, bit.lshift
 
 local function dwords_to_chars(ns)
@@ -98,8 +100,6 @@ local function digest_block256(input, t, H)
 	local word
 	local a, b, c, d, e, f, g, h
 	local k = k256
-
-	local limit = 2^32
 
 	local W = {}
 	local chunk
@@ -282,14 +282,14 @@ local function keymaster(seedstring, difc, progress)
 end
 
 local function calibrate()
-	for difc = 1, 32 do
+	for difc = 1, MAXDIFC do
 		print("Trying difficulty "..difc)
 		local gotrnd, time = keymaster("Xuul",difc,true)
 		print("Seconds: "..time)
 		print()
 		if time >= 10 then
 			print("\nCALIBRATION RESULTS FOR THIS MACHINE:")
-			for d = difc, 32 do
+			for d = difc, MAXDIFC do
 				local t = time
 				local ts = t.." seconds"
 				if t > 180 then
@@ -383,7 +383,7 @@ local function main()
 		DIFFICULTY = tonumber(opts.difficulty)
 	end
 
-	if DIFFICULTY < 0 or DIFFICULTY > 32 or (DIFFICULTY ~= math.floor(DIFFICULTY)) then
+	if DIFFICULTY < 0 or DIFFICULTY > MAXDIFC or (DIFFICULTY ~= math.floor(DIFFICULTY)) then
 		error("Invalid difficulty: "..DIFFICULTY)
 	end
 
