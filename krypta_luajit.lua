@@ -1,11 +1,11 @@
 #!/usr/bin/env luajit
 
 --[[
-	*CHANGE the SALT* to something you can easily remember.
-	For example your e-mail, your mobile phone number or your date of birth.
-	It can be fairly obvious info, known to people around you but
-	it must be specific to you personally,
-	so it SHOULD NOT be e.g. the name of your pet or your favorite food or color.
+	Set the SALT to something you can easily remember.
+	For example your e-mail, your phone number or your full date of birth.
+	It can be fairly obvious info, known to people around you
+	but it should be fairly unique
+	so it SHOULD NOT be the name of your pet or your favorite food or color.
 ]]
 local SALT = "" --Put the SALT between the quotes.
 local DIFFICULTY = 0 --Put desired difficulty here
@@ -245,6 +245,7 @@ end
 local function keymaster(seedstring, difc, progress)
 	local prgfnc = function() end
 	local iterations = 0x100000
+	local one64 = rshift(iterations, 6)
 	if progress then
 		local prg = "012345abcdefghijklmnopqrstuvwxyz012345ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 		local progressbar = {}
@@ -252,30 +253,30 @@ local function keymaster(seedstring, difc, progress)
 			progressbar[i] = prg:sub(i,i)
 		end
 		io.write("Progress: ")
-		local mask = rshift(iterations - 1,6)
 		local count = 1
-		prgfnc = function(x)
-			if band(x,mask) == 0 then
-				io.write(string.format(progressbar[count]))
-				io.flush()
-				if count == 64 then
-					print()
-				end
-				count = count + 1
+		prgfnc = function()
+			io.write(string.format(progressbar[count]))
+			io.flush()
+			if count == 64 then
+				print()
 			end
+			count = count + 1
 		end
 	end
 
 	local rnd = new_random(sha256(seedstring, "dwords"))
 	local difmask = bit.rshift(0xffffffff, 32-difc)
 	local t0 = os.time()
-	for i = 0, iterations - 1 do
-		prgfnc(i)
-		local seek = band(difmask, rnd())
-		--print("looking for "..tohex(seek))
-		repeat
-			local got = band(difmask,rnd())
-		until got == seek
+	for round = 1, 64 do
+		prgfnc()
+		for i = 1, one64 do
+			difmask = ror(difmask, band(rnd(), 31))
+			local seek = band(difmask, rnd())
+--			print("looking for "..tohex(seek)..", mask: "..tohex(difmask))
+			repeat
+				local got = band(difmask,rnd())
+			until got == seek
+		end
 	end
 	local master = get256bits(rnd)
 	return master, os.time()-t0
@@ -337,8 +338,8 @@ local function test()
 		assert(tobit(val) == tobit(dump[i]), "bad "..i)
 	end
 	assert(tohex(rnd0())=="8995132f")
-
-	assert(hex256(keymaster("Satan",2),"-") == "fa33bc46-33732eca-2fb42099-570eb3b0-b47464a8-31229bd1-630c2002-61bef559")
+	--print(hex256(keymaster("Satan",2),"-"))
+	assert(hex256(keymaster("Satan",2),"-") == "16784c4f-eb122684-376d1d73-375adccd-133b10cf-4ef0bac3-abe34427-a09aecd2")
 end
 
 local function parse_options()
