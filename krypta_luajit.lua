@@ -338,7 +338,8 @@ local function test()
 		assert(tobit(val) == tobit(dump[i]), "bad "..i)
 	end
 	assert(tohex(rnd0())=="8995132f")
-	--print(hex256(keymaster("Satan",2),"-"))
+
+	assert(hex256(get256bits(rnd0),"-") == "e7ba2240-c5aa7fe7-584a794e-c0ab7d4b-1b74cf7b-ccbaf55d-b5e5b889-1442c646")
 	assert(hex256(keymaster("Satan",2),"-") == "16784c4f-eb122684-376d1d73-375adccd-133b10cf-4ef0bac3-abe34427-a09aecd2")
 end
 
