@@ -28,6 +28,20 @@ local function dwords_to_chars(ns)
 	return table.concat(res)
 end
 
+local function dwords_to_password(dwords)
+	local chars = "$*23456789abcdef@hijk(mnop)rstuvwxyzABCDEFGH=JKLMN#PQRSTUVWXYZ!?"
+	assert(#dwords == 8)
+	local result = {}
+	for i, dword in ipairs(dwords) do
+		for j = 1, 5 do
+			dword = rol(dword,6)
+			local num = band(dword, 63) + 1
+			table.insert(result,string.sub(chars,num,num))
+		end
+	end
+	return table.concat(result)
+end
+
 local function get256bits(rand)
 	local dwords = {}
 	for i = 1, 8 do
@@ -339,7 +353,10 @@ local function test()
 	end
 	assert(tohex(rnd0())=="8995132f")
 
-	assert(hex256(get256bits(rnd0),"-") == "e7ba2240-c5aa7fe7-584a794e-c0ab7d4b-1b74cf7b-ccbaf55d-b5e5b889-1442c646")
+	local key = get256bits(rnd0)
+	assert(hex256(key,"-") == "e7ba2240-c5aa7fe7-584a794e-c0ab7d4b-1b74cf7b-ccbaf55d-b5e5b889-1442c646")
+	assert(dwords_to_password(key) == "VXEy@N)F?Vm4FVjMaJZi6TjfuPbHRnJumUy54b6h")
+
 	assert(hex256(keymaster("Satan",2),"-") == "16784c4f-eb122684-376d1d73-375adccd-133b10cf-4ef0bac3-abe34427-a09aecd2")
 end
 
@@ -447,7 +464,8 @@ local function main()
 		local rnd = new_random(sha256(index..zeroes..strseed0,"dwords"))
 		local result = get256bits(rnd)
 		assert(#result == 8)
-		print(hex256(result))
+		print("256bit hex number: "..hex256(result))
+		print("40 chars password: "..dwords_to_password(result))
 	end
 end
 
