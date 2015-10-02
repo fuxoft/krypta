@@ -28,11 +28,13 @@ local function dwords_to_chars(ns)
 	return table.concat(res)
 end
 
-local function dwords_to_password(dwords)
+local function dwords_to_password(dwords,fives)
+	fives = fives or 8
 	local chars = "$*23456789abcdef@hijk(mnop)rstuvwxyzABCDEFGH=JKLMN#PQRSTUVWXYZ!?"
 	assert(#dwords == 8)
 	local result = {}
-	for i, dword in ipairs(dwords) do
+	for i = 1, fives do
+		local dword = assert(dwords[i])
 		for j = 1, 5 do
 			dword = rol(dword,6)
 			local num = band(dword, 63) + 1
@@ -446,8 +448,8 @@ local function main()
 	print("Calculating master key at difficulty "..DIFFICULTY)
 	local masterkey,time = keymaster(masterseed, DIFFICULTY, true)
 	print("Masterkey generated in "..time.." seconds.")
-	local chsum = bxor(masterkey[1],masterkey[7],masterkey[8])
-	print("Masterkey checksum is: 0x"..tohex(chsum))
+	local chsum = band(0xffff,bxor(masterkey[1],masterkey[7],masterkey[8]))
+	print(string.format("Masterkey checksum is: 0x%04x",chsum))
 	if CHECKSUM then
 		if tobit(CHECKSUM) ~= tobit(chsum) then
 			print("!!! CHECKSUM DOES NOT MATCH !!!")
@@ -465,7 +467,9 @@ local function main()
 		local result = get256bits(rnd)
 		assert(#result == 8)
 		print("256bit hex number: "..hex256(result))
+		print("With spaces: "..hex256(result," "))
 		print("40 chars password: "..dwords_to_password(result))
+		print("15 chars password: "..dwords_to_password(result,3))
 	end
 end
 
