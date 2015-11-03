@@ -9,7 +9,7 @@
 ]]
 local SALT = "" --Put the SALT between the quotes.
 local DIFFICULTY = 0 --Put desired difficulty here
-local CHECKSUM = 0x12345678 --Put checksum here
+local CHECKSUM = nil --Put three digit hex checksum here - for example 0x123
 
 --RSA256 implementation from https://github.com/JustAPerson/LuaCrypt/
 
@@ -414,11 +414,11 @@ local function main()
 		os.exit()
 	end
 
-	if CHECKSUM == 0x12345678 then
-		CHECKSUM = nil
-	end
-
 	CHECKSUM = CHECKSUM or tonumber(opts.checksum)
+
+	if CHECKSUM then
+		assert(CHECKSUM >= 0 and CHECKSUM <= 0xfff, "Invalid checksum value")
+	end
 
 	print("STARTING!")
 	test()
@@ -448,8 +448,8 @@ local function main()
 	print("Calculating master key at difficulty "..DIFFICULTY)
 	local masterkey,time = keymaster(masterseed, DIFFICULTY, true)
 	print("Masterkey generated in "..time.." seconds.")
-	local chsum = band(0xffff,bxor(masterkey[1],masterkey[7],masterkey[8]))
-	print(string.format("Masterkey checksum is: 0x%04x",chsum))
+	local chsum = band(0xfff,bxor(masterkey[1],masterkey[7],masterkey[8]))
+	print(string.format("Masterkey checksum is: 0x%03x",chsum))
 	if CHECKSUM then
 		if tobit(CHECKSUM) ~= tobit(chsum) then
 			print("!!! CHECKSUM DOES NOT MATCH !!!")
