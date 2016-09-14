@@ -117,7 +117,7 @@ local k256 = {
 --- Preprocess input message
 local function preprocess256(input)
 	local length = #input;	-- length in bits
-	local padding = 64 - ((length + 9) % 64);
+	local padding = (-length-9) % 64
 	input = input .. "\128" .. ("\0"):rep(padding) .. "\0\0\0\0";
 	local l = length * 8
 	for i = 1, 4 do
