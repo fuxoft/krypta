@@ -1,4 +1,5 @@
 #!/usr/bin/env luajit
+--version 20160914
 
 --[[
 	Set the SALT to something you can easily remember.
