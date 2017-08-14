@@ -1,5 +1,5 @@
 #!/usr/bin/env luajit
---version 20160914
+--version 20170814
 
 --[[
 	Set the SALT to something you can easily remember.
@@ -512,8 +512,9 @@ local function main()
 	local strseed0 = dwords_to_chars(masterkey)
 	while true do
 		print("\n----------------------------------")
-		print("Enter index (default='0')")
-		local index = io.read() or "0"
+		print("Enter index (default='')")
+		local index = assert(io.read())
+		print(string.format("Index = '%s' (%s chars)", index, #index))
 		local rnd = new_random(sha256(index..zeroes..strseed0,"dwords"))
 		local result = get256bits(rnd)
 		assert(#result == 8)
