@@ -143,13 +143,6 @@ local function bin_to_any_module()
 		end
 	end
 
-	local function test()
-		local alphabet = "012"
-		for i = 0,20 do
-			print(_M.convert({i},alphabet,8))
-		end
-	end
-
 	return _M
 end
 
@@ -529,6 +522,27 @@ local function calibrate()
 	end
 end
 
+local function btc_key(dwords)
+	if (dwords[1] == 0 or dwords[1] == 0xffffffff) and (dwords[1] == dwords[2]) and (dwords[2] == dwords[3]) then
+		print("?!?!?!?!?! First 3 dwords are the same !?!?!?!?!?!?! BTC key could be invalid") --Hmm, LOL
+	end
+	local result = {}
+	for ii, typ in ipairs{"compressed", "uncompressed"} do
+		local str = string.char(0x80)..dwords_to_chars(dwords)
+		if typ == "compressed" then
+			str = str .. string.char(0x01)
+		end
+		local chk = (sha256(str, "dwords"))
+		chk = sha256(dwords_to_chars(chk),"dwords")[1]
+		for i = 1, 4 do
+			chk = rol(chk, 8)
+			str = str .. string.char(band(chk, 0xff))
+		end
+		result[typ] = to_base58(chars_to_dwords(str))
+	end
+	return result
+end
+
 local function test()
 	assert(to_binstr(7)=="00000000000000000000000000000111")
 	local bs = bitstream{1,1,1,0,0,0,1,1,1,0,0,0}
@@ -566,6 +580,9 @@ local function test()
 	assert(hex256(keymaster("Satan",2),"-") == "16784c4f-eb122684-376d1d73-375adccd-133b10cf-4ef0bac3-abe34427-a09aecd2")
 	assert(BIN_TO_ANY.convert({0x12345678,0xffffffff},"0123456789abcdef") == "12345678ffffffff")
 	assert(to_base58({0x80, 0x32247122, 0xF9FF8BB7, 0x8BBEFC55, 0x4E729121, 0x24410788, 0x2417AF0D, 0x77EB7A22, 0x784171F2, 0xAB079763}) == "5JCNQBno4UP562LCEXMTr72WVUe315rrXzPqAFiap8zQNjzarbL")
+	local btckeys = btc_key(keymaster("Satan",1),"-")
+	assert(btckeys.compressed == "Ky63MMQWPEYLpG5rbbSxDbtAwfzaNDvKzH2co6QXKg7mFJHft5TS")
+	assert(btckeys.uncompressed == "5JEq7RZWmTdZ8Y4NCv7nb7zp7VmmGEMEpR2Gp9UXtMeL65u7vyv")
 end
 
 local function parse_options()
@@ -592,25 +609,6 @@ local function parse_options()
 		end
 	end
 	return opts
-end
-
-local function btc_key(dwords)
-	if (dwords[1] == 0 or dwords[1] == 0xffffffff) and (dwords[1] == dwords[2]) and (dwords[2] == dwords[3]) then
-		print("?!?!?!?!?! First 3 dwords are the same !?!?!?!?!?!?! BTC key could be invalid") --Hmm, LOL
-	end
-	for ii, typ in ipairs{"compressed", "uncompressed"} do
-		local str = string.char(0x80)..dwords_to_chars(dwords)
-		if typ == "compressed" then
-			str = str .. string.char(0x01)
-		end
-		local chk = (sha256(str, "dwords"))
-		chk = sha256(dwords_to_chars(chk),"dwords")[1]
-		for i = 1, 4 do
-			chk = rol(chk, 8)
-			str = str .. string.char(band(chk, 0xff))
-		end
-		print(string.format("BTC privkey (%s): %s", typ, to_base58(chars_to_dwords(str))))
-	end
 end
 
 local function main()
@@ -648,6 +646,7 @@ local function main()
 
 	print("STARTING!")
 	test()
+	print("Self-tests OK")
 	print("SALT='"..SALT.."' ("..#SALT.." characters)")
 	assert(type(SALT) == "string", "SALT is not string")
 	if #SALT == 0 then
@@ -696,7 +695,10 @@ local function main()
 		assert(#result == 8)
 		print("256bit hex number: "..hex256(result))
 		print("With spaces: "..hex256(result," "))
-		btc_key(result)
+		local btckeys = btc_key(result)
+		for ind, typ in ipairs {"compressed", "uncompressed"} do
+			print(string.format("BTC privkey (%s): %s", typ, btckeys[typ]))
+		end
 		print("40 chars password: "..dwords_to_password(result))
 		print("15 chars password: "..dwords_to_password(result,3))
 		print("BIP39/12: "..bip39{result[1], result[2], result[3], result[4]})
