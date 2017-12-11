@@ -1,2 +1,2 @@
 # krypta
-Generating random bits (and Bitcoin private keys) from text seed and salt using only plain LuaJIT, without any external dependencies.
+Generating random bits, passwords, recovery phrases and Bitcoin private keys / addresses from text seed and salt. Deliberately implemented in single file pure LuaJIT (including crypto routines and hashing functions) without ANY externaly dependencies. This is useful for generating passwords / private keys etc for the most important stuff you have. This software is ugly, not user friendly and not meant for computer illiterate.
