@@ -11,7 +11,6 @@
 local SALT = "" --Put the SALT between the quotes.
 local DIFFICULTY = 0 --Put desired difficulty here
 local CHECKSUM = nil --Put three digit hex checksum here - for example 0x123
---RSA256 implementation from https://github.com/JustAPerson/LuaCrypt/
 
 local MAXDIFC = 31
 
@@ -238,6 +237,7 @@ local bitstream = function(rem_bits)
 	end)
 end
 
+--RSA256 implementation from https://github.com/JustAPerson/LuaCrypt/
 --- Round constants
 -- computed as the fractional parts of the cuberoots of the first 64 primes
 local k256 = {
@@ -354,6 +354,109 @@ local function hex256(dwords, separator)
 		res[i] = tohex(dwords[i])
 	end
 	return table.concat(res,separator)
+end
+
+local function ripemd160(input, format)
+	local function swap_endian(dw)
+		local n = 0
+		for j = 1, 4 do
+			n = bor(lshift(n, 8), band(0xff, dw))
+			dw = rshift(dw, 8)
+		end
+		return n
+	end
+	local len = #input
+	input = input .. "\128"
+	while #input % 64 ~= 56 do
+		input = input .. "\000"
+	end
+	input = input .. dwords_to_chars({swap_endian(len * 8)})
+	input = input .. "\000\000\000\000" --LOL, not likely to exceed 32bit length
+	assert(#input % 64 == 0)
+	
+	local funs = {}
+	local funs = {
+		[0] = function(x, y, z) return bxor(x, y, z) end,
+		function(x, y, z) return bor(band(x, y), band(bnot(x), z)) end,
+		function(x, y, z) return bxor(bor(x, bnot(y)), z) end,
+		function(x, y, z) return bor(band(x, z), band(y, bnot(z))) end,
+		function(x, y, z) return bxor(x, bor(y, bnot(z))) end
+	}
+
+	local K = {[0] = 0, 0x5A827999, 0x6ED9EBA1, 0x8F1BBCDC, 0xA953FD4E}
+	local K2 = {[0] = 0x50A28BE6, 0x5C4DD124, 0x6D703EF3, 0x7A6D76E9, 0}
+	local r = {
+		[0] = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    	7, 4, 13, 1, 10, 6, 15, 3, 12, 0, 9, 5, 2, 14, 11, 8,
+    	3, 10, 14, 4, 9, 15, 8, 1, 2, 7, 0, 6, 13, 11, 5, 12,
+    	1, 9, 11, 10, 0, 8, 12, 4, 13, 3, 7, 15, 14, 5, 6, 2,
+		4, 0, 5, 9, 7, 12, 2, 10, 14, 1, 3, 8, 11, 6, 15, 13
+	}
+	local r2 = {
+    	[0] = 5, 14, 7, 0, 9, 2, 11, 4, 13, 6, 15, 8, 1, 10, 3, 12,
+    	6, 11, 3, 7, 0, 13, 5, 10, 14, 15, 8, 12, 4, 9, 1, 2,
+    	15, 5, 1, 3, 7, 14, 6, 9, 11, 8, 12, 2, 10, 0, 4, 13,
+    	8, 6, 4, 1, 3, 11, 15, 0, 5, 12, 2, 13, 9, 7, 10, 14,
+		12, 15, 10, 4, 1, 5, 8, 7, 6, 2, 13, 14, 0, 3, 9, 11
+	}
+	local s = {
+		[0] = 11, 14, 15, 12, 5, 8, 7, 9, 11, 13, 14, 15, 6, 7, 9, 8,
+    	7, 6, 8, 13, 11, 9, 7, 15, 7, 12, 15, 9, 11, 7, 13, 12,
+    	11, 13, 6, 7, 14, 9, 13, 15, 14, 8, 13, 6, 5, 12, 7, 5,
+    	11, 12, 14, 15, 14, 15, 9, 8, 9, 14, 5, 6, 8, 6, 5, 12,
+		9, 15, 5, 11, 6, 8, 13, 12, 5, 12, 13, 14, 11, 8, 5, 6
+	}
+	local s2 = {
+		[0] = 8, 9, 9, 11, 13, 15, 15, 5, 7, 7, 8, 11, 14, 14, 12, 6,
+    	9, 13, 15, 7, 12, 8, 9, 11, 7, 7, 12, 7, 6, 15, 13, 11,
+    	9, 7, 15, 11, 8, 6, 6, 14, 12, 13, 5, 14, 13, 13, 7, 5,
+    	15, 5, 8, 11, 14, 14, 6, 14, 6, 9, 12, 9, 12, 5, 15, 8,
+		8, 5, 12, 9, 12, 5, 14, 6, 8, 13, 6, 5, 15, 13, 11, 11
+	}
+	local function f(j, x, y, z)
+		local res = funs[rshift(j,4)](x, y, z)
+		--print("f result", tohex(res))
+		return res
+	end
+	local h0, h1, h2, h3, h4 = 0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0	
+	for blk in input:gmatch("(................................................................)") do
+		local A, B, C, D, E = h0, h1, h2, h3, h4
+		local A2, B2, C2, D2, E2 = h0, h1, h2, h3, h4
+		local X = {}
+		for i = 0, 63 do
+			local ind = rshift(i, 2)
+			X[ind] = ror(bor(X[ind] or 0, string.byte(blk:sub(i+1))), 8)
+		end
+		
+		for j = 0, 79 do
+			local jsh = rshift(j, 4)
+			--print("A f X K s E", tohex(A), tohex(f(j,B,C,D)), tohex (X[r[j]]), tohex(K[jsh]), s[j], tohex(E))
+			local T = tobit(rol (tobit(A + f(j, B, C, D) + X[r[j]] + K[jsh]), s[j]) + E)
+			--print("T1", tohex(T))
+			A = E; E = D; D = rol(C, 10); C = B; B = T
+			T = tobit(rol(tobit(A2 + f(79-j, B2, C2, D2) + X[r2[j]] + K2[jsh]), s2[j]) + E2)
+			A2 = E2; E2 = D2; D2 = rol(C2, 10); C2 = B2; B2 = T
+		end
+		local T = bit.tobit(h1 + C + D2)
+		h1 = bit.tobit(h2 + D + E2)
+		h2 = bit.tobit(h3 + E + A2)
+		h3 = bit.tobit(h4 + A + B2)
+		h4 = bit.tobit(h0 + B + C2)
+		h0 = T
+		--print ("h0-4:",tohex(h0), tohex(h1), tohex(h2), tohex(h3), tohex(h4))
+	end
+	local result = {h0, h1, h2, h3, h4}
+	for i = 1, 5 do
+		result[i] = swap_endian(result[i])
+	end
+	if format == "dwords" then
+		return result
+	end
+	for i = 1, 5 do
+		result[i] = bit.tohex(result[i])
+	end
+	--print(table.concat(result))
+	return table.concat(result)
 end
 
 --- Calculate the SHA256 digest of a message
@@ -552,6 +655,8 @@ local function test()
 	local res = chars_to_dwords("12ABCD")
 	assert(res[1] == 0x00003132)
 	assert(res[2] == 0x41424344)
+	assert(ripemd160("") == "9c1185a5c5e9fc54612808977ee8f548b2258d31", "RIPEMD test 1 failed")
+	assert(ripemd160("The quick brown fox jumps over the lazy dog") == "37f332f68db77bd9d7edd4969571ad671cf9dd3b", "RIPEMD test 2 failed")
 	assert(sha256("") == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
 	assert(sha256("The quick brown fox jumps over the lazy dog") == "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592")
 	local sh = new_shifter(0x12345678)
