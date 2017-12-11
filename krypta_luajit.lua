@@ -1,5 +1,5 @@
 #!/usr/bin/env luajit
---version 20171125
+--version 20171211
 
 --[[
 	Set the SALT to something you can easily remember.
@@ -15,6 +15,589 @@ local CHECKSUM = nil --Put three digit hex checksum here - for example 0x123
 local MAXDIFC = 31
 
 local bxor, band, bor, ror, rol, tohex, tobit, bnot, rshift, lshift = bit.bxor, bit.band, bit.bor, bit.ror, bit.rol, bit.tohex, bit.tobit, bit.bnot, bit.rshift, bit.lshift
+
+local function load_bignum()
+
+	-- BigNum module
+	local _M = {}
+	local bpd = 30
+	local maxd = bit.rol(1,bpd) - 1
+	--print (bit.tohex(maxd))
+
+	local function normalize(self)
+		while #self > 1 and self[#self] == 0 do
+			table.remove(self)
+		end
+		--print("normalized", table.concat(self, ","))
+		return self
+	end
+
+	local mt = {}
+
+	local function check_bignum(n)
+		if not(getmetatable(n) == mt) then
+			error (tostring(n).." is not a bignum")
+		end
+	end
+
+	mt.__tostring = function(self, padding)
+		--print(">", self[1], self.negative, "<")
+		local cr = coroutine.create( function()
+			for d = 1, #self do
+				local digit, last = self[d], d==#self
+				for b = 1, bpd do
+					coroutine.yield (bit.band(digit, 1))
+					digit = bit.rshift(digit, 1)
+					if last and digit == 0 then
+						while true do
+							coroutine.yield(false)
+						end
+					end
+				end
+			end
+		end)
+
+		local result = {}
+		local function get()
+			local ok, got = coroutine.resume(cr)
+			if not ok then
+				error(got)
+			end
+			return got
+		end
+		while true do
+			local d = get()
+			if not d then
+				break
+			end
+			d = d + 2 * (get() or 0) + 4 * (get() or 0) + 8 * (get() or 0)
+			table.insert(result, 1, string.format("%x", d))
+		end
+		if not next(result) then
+			result = {"0"}
+		end
+		if padding then
+			while #result < padding do
+				table.insert(result, 1, "0")
+			end
+		end
+		table.insert(result, 1,"0x")
+		if self.negative then
+			table.insert(result, 1, "-")
+		end
+		return (table.concat(result))
+	end
+
+	mt.__eq = function(self, oth)
+		check_bignum(oth)
+		if self.negative ~= oth.negative then
+			return false
+		end
+		if #self ~= #oth then
+			return false 
+		end
+		for i, d in ipairs(self) do
+			if d ~= oth[i] then
+				return false
+			end
+		end
+		return true
+	end
+
+	mt.__lt = function(self, oth)
+		check_bignum(oth)
+		if self.negative ~= oth.negative then
+			return not oth.negative
+		end
+		if self == oth then
+			return false
+		end
+
+		local function lt0(n1, n2) --assert not equal, ignore sign
+			if #n1 ~= #n2 then
+				return #n1 < #n2
+			end
+			for i = #n1, 1, -1 do
+				if n1[i] ~= n2[i] then
+					return n1[i] < n2[i]
+				end
+			end
+			error("Shouldn't be equal")
+		end
+
+		if self.negative then
+			return lt0(oth, self)
+		else
+			return lt0(self, oth)
+		end
+	end
+
+	mt.__le = function(self, oth)
+		check_bignum(oth)
+		if self == oth then
+			return true
+		end
+		return self < oth
+	end
+
+	_M.copy = function(self)
+		check_bignum(self)
+		local c = {}
+		for k, v in pairs(self) do
+			c[k] = v
+		end
+		setmetatable(c, mt)
+		return c
+	end
+
+	_M.to_dwords = function(self, dw)
+		self = _M.copy(self)
+		local dwords = {}
+		for i = 1, dw do
+			local dword = bit.band(0xffff, self[1])
+			_M.rshift(self, 16)
+			dword = bit.bor(dword, bit.lshift(bit.band(0xffff, self[1]), 16))
+			_M.rshift(self, 16)
+			table.insert(dwords, 1, dword)
+		end
+		return dwords
+	end
+
+	mt.__unm = function(self)
+		local x = _M.copy(self)
+		if x ~= _M.zero then
+			x.negative = not self.negative
+		end
+		--print("negated", self, x)
+		return x
+	end
+
+	mt.__add = function(self, oth)
+		--print("add", self, oth)
+
+		check_bignum(oth)
+		if oth == _M.zero then
+			return self
+		end
+		
+		if self == _M.zero then
+			return oth
+		end
+
+		if self == -oth then
+			return _M.zero
+		end
+
+		if self.negative ~= oth.negative then
+			if oth.negative then
+				return self - (-oth)
+			else
+				return - (-self - (oth))
+			end
+		end
+		--Both have same sign
+		if #self < #oth then
+			self, oth = oth, self
+		end
+		local result = {negative = self.negative}
+		setmetatable (result, mt)
+		local carry = 0
+		for i = 1, #self do
+			local sum = self[i] + (oth[i] or 0) + carry
+			result[i] = bit.band(maxd, sum)
+			if sum > maxd then
+				carry = 1
+			else 
+				carry = 0
+			end
+		end
+		if carry == 1 then
+			table.insert(result, 1)
+		end
+		return result
+	end
+
+	mt.__mul = function(self, oth)
+		check_bignum(oth)
+		
+		local zero, one = _M.zero, _M.new(1)
+		if self == one then
+			return oth
+		end
+
+		if oth == one then
+			return self
+		end
+
+		if self == zero or oth == zero then
+			return zero
+		end
+
+		local acc = zero
+		local m1, m2 = _M.abs(self), _M.abs(oth)
+		if m1 < m2 then
+			m1, m2 = m2, m1
+		end
+		--m1 >= m2
+		m2 = _M.copy(m2) --Will be modified (shifted)
+		while m2 ~= zero do
+			if _M.rshift(m2, 1) ~= 0 then
+				acc = acc + m1
+			end
+			m1 = m1 + m1
+		end
+		acc.negative = self.negative ~= oth.negative
+		return acc
+	end
+
+	_M.pow = function(x, y, p) --a la Python
+		local zero = _M.zero
+		local acc = _M.new(1)
+		local m1, m2 = _M.abs(x), _M.abs(y)
+		m2 = _M.copy(m2) --Will be modified (shifted)
+		assert(m2 > zero) -- ? TODO ?
+		while m2 ~= zero do
+			if _M.rshift(m2, 1) ~= 0 then
+				acc = acc * m1
+				if p then
+					acc = _M.mod(acc, p)
+				end
+			end
+			m1 = m1 * m1
+			if p then
+				m1 = _M.mod(m1, p)
+			end
+			--print(m1, acc, p)
+		end
+		return acc
+	end
+
+	mt.__sub = function(self, oth)
+		--print("sub", self, oth)
+		check_bignum(oth)
+		if self == oth then
+			return _M.zero
+		end
+		if oth == _M.zero then
+			return self
+		end
+		if self == _M.zero then
+			return -oth
+		end
+
+		if self.negative ~= oth.negative then
+			if oth.negative then
+				return self + (-oth)
+			else
+				return -(-self + oth)
+			end
+		end
+
+		--assume same signs
+		
+		if self.negative then
+			if self > oth then
+				return (-oth - (-self))
+			end
+		else
+			if self < oth then
+				return -(oth - self)
+			end
+		end
+
+		local result = {negative = self.negative}
+		setmetatable(result, mt)
+
+		local carry = 0
+
+		for i = 1, #self do
+			sum = self[i] - (oth[i] or 0) - carry
+			if sum < 0 then
+				sum = sum + maxd + 1
+				carry = 1
+			else
+				carry = 0
+			end
+			result[i] = sum
+		end
+		assert(carry == 0)
+		normalize(result)
+		return(result)
+	end
+
+	_M.new = function(n)
+		if type(n) == "number" then
+			local int = n
+			local num = {math.abs(int)}
+			num.negative = int < 0
+			setmetatable(num, mt)
+			return num
+		elseif type(n) == "string" then -- "0xffff"
+			local num = _M.copy(_M.zero) --Needs copy because we modify it manually
+			local digits = n:match("0x(.+)")
+			for digit in digits:gmatch(".") do
+				num = num + num
+				num = num + num
+				num = num + num
+				num = num + num
+				local d = tonumber(digit, 16)
+				--print(d)
+				assert(d, "Invalid char: "..digit)
+				--print(num)
+				num[1] = bit.bor(num[1], d)
+				--print(num)
+			end
+			if n:match("^%-") then
+				num.negative = true
+			end
+			return num
+		else
+			error("Invalid number type")
+		end
+	end
+
+	_M.padding = function(num, chrs)
+		return mt.__tostring(num, chrs)
+	end
+
+	_M.rshift = function(num, x) --Right shift x bits IN PLACE and return the overflown bits (already shifted!)
+		check_bignum(num)
+		assert(x < bpd)
+		local mask = 2 ^ x - 1
+		local carry = 0
+		for i = #num, 1, -1 do
+			local bits = bit.band(num[i], mask)
+			num[i] = bit.bor(bit.rshift(num[i], x), carry)
+			carry = bit.lshift(bits, bpd - x)
+		end
+		normalize(num)
+		return carry
+	end
+
+	_M.divmod = function(x, y, fl) -- fl == true -> mod only
+		fl = not fl
+		local one = _M.new(1)
+		if x.negative then
+			if y.negative then -- -x, -y
+				local d, m = _M.divmod0(-x, -y, fl)
+				return d, -m
+			else -- -x, +y
+				local d, m = _M.divmod0(-x, y, fl)
+				return -(d+one), y-m
+			end
+		else -- x > zero
+			if y.negative then -- +x, -y
+				local d, m = _M.divmod0(x, -y, fl)
+				return -(d+one), y + m
+			else -- +x, +y
+				local d, m = _M.divmod0(x, y, fl)
+				return d, m
+			end
+		end
+	end
+
+	_M.mod = function(x, y)
+		local d, m = _M.divmod(x, y, true)
+		--print("mod", d, m)
+		return m
+	end
+
+	--[[divmod:
+	100, 3 = 33, 1
+	-100, -3 = 33, -1
+	-100, 3 = -34, 2
+	100, -3 = -34, -2
+	]]
+
+	_M.divmod0 = function(x, y, divmod)
+		check_bignum(x)    
+		check_bignum(y)
+		--assume positive x, y
+		assert(not x.negative)
+		assert(not y.negative)
+		local zero = _M.zero
+		assert(x >= zero)
+		assert(y > zero)
+		local one = _M.new(1)
+		if x < y then
+			return zero, x
+		end
+		if y == one then
+			return x, zero
+		end
+		assert(y > zero)
+
+		local dm = zero
+
+		local powers = {}
+		local pow = y
+		local ind = 0
+		repeat
+			ind = ind + 1
+			powers[ind] = pow
+			pow = pow + pow
+		until pow > x
+		for i = ind, 1, -1 do
+			if divmod then
+				dm = dm + dm
+			end
+			if powers[i] <= x then
+				x = x - powers[i]
+				if divmod then
+					dm = dm + one
+				end
+			end
+		end
+		return dm, x
+	end
+
+	_M.zero = _M.new(0)
+
+	_M.abs = function(num)
+		if num >= _M.zero then
+			return num
+		end
+		return -num
+	end
+
+	_M.test = function()
+		assert(_M.new(-23) == _M.new(-23))
+		assert(_M.new(-23) ~= _M.new(23))
+		assert(_M.new(-23) == -_M.new(23))
+		local sum = _M.zero
+		math.randomseed(1)
+		local iters = 20
+		for i = 1, iters do
+			local x = _M.new(math.random(maxd) - math.floor(maxd / 2))
+			for i = 1, math.random(20) do
+				x = x + x - _M.new(math.random(9))
+			end
+			if i <= iters / 2 then
+			--    print("+", sum, x)
+				sum = sum + x
+			else
+			--    print("-", sum, x)
+				sum = sum - x
+			end
+			--print("sum is", sum)
+			if i == iters / 2 then
+				math.randomseed(1)
+			end
+		end
+		assert(sum == _M.zero)
+		assert(tostring(_M.new("-0x1234567890abcdef")) == "-0x1234567890abcdef")
+		assert(_M.padding(_M.new("-0x12abc"),8) == "-0x00012abc")
+		assert(_M.new("0x123456789") * _M.new("-0xdeadbeef") == _M.new("-0xFD5BDEED363856E7"))
+		assert(_M.mod(_M.new("0x3b9ac9ff"), _M.new("0x3e7")) == _M.zero)
+		assert(_M.mod(_M.new("0x1234567890"), _M.new("0x6789")) == _M.new("0x59a6"))
+		for i, test in ipairs {{"0x64", "0x3", "0x21", "0x1"}, {"-0x64", "-0x3", "0x21", "-0x1"}, {"-0x64", "0x3", "-0x22", "0x2"}, {"0x64", "-0x3", "-0x22", "-0x2"}} do
+			local x, y, d0, m0 = _M.new(test[1]), _M.new(test[2]), _M.new(test[3]), _M.new(test[4])
+			local d, m = _M.divmod(x,y)
+			--print(x, y, d0, m0)
+			--print(d, m)
+			assert(d == d0 and m == m0)
+		end
+		
+		--assert(_M.pow(_M.new("0x10"), _M.new("0x3"), _M.new("0xbeef")) == _M.new("0x1000"))
+		--assert(_M.pow(_M.new("0xabcdef"), _M.new("0x123456789"), _M.new("0x123456789abcdef")) == _M.new("0x2d357497e15f50"))
+		--print(_M.pow(_M.new("0xabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdef"), _M.new("0x123456789123456789123456789123456789123456789123456789123456789123456789"), _M.new("0x123456789abcdef")))
+	end
+
+	return _M
+end
+
+local privkey_to_pubkey = function(secret)
+	assert(#secret > 30)
+	local new = BIGNUM.new
+	local zero = BIGNUM.zero
+	local one = new(1)
+	local two = new(2)
+	local three = new(3)
+	local p = new("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F")
+	local g = {x=new("0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798"), y=new("0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8")}
+	local order = new("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141")
+	secret = new(secret)
+
+	local function inverse_mod(a)
+		if a < zero or a >= p then
+			a = BIGNUM.mod(a, p)
+		end
+		local c, d, uc, vc, ud, vd = a, p, one, zero, zero, one
+		local q
+		while c ~= zero do
+			--print("call divmod", d, c)
+			local c0 = c
+			q, c = BIGNUM.divmod(d, c)
+			d = c0
+			--print("q c d", q, c, d)
+			uc, vc, ud, vd = ud - q * uc, vd - q * vc, uc, vc
+		end
+		--print("while ended")
+		--print("ud", ud)
+		local bool = ud > zero 
+		if ud > zero then
+			return ud
+		end
+		return ud + p
+	end
+
+	local function calc(self, top, bottom, other_x)
+		local l = BIGNUM.mod(top * inverse_mod(bottom), p)
+		local x3 = BIGNUM.mod(l * l - self.x - other_x, p)
+		return {x = x3, y = BIGNUM.mod(l * (self.x - x3) - self.y, p)}
+	end
+
+	local function double(self)
+		if self == "inf" then
+			return self
+		end
+		return calc(self, three * self.x * self.x, two * self.y, self.x)
+	end
+
+	local function add(self, other)
+		if other == "inf" then
+			return self
+		end
+		if self == "inf" then
+			return other
+		end
+		if self.x == other.x then
+			if BIGNUM.mod((self.y + other.y), p) == zero then
+				return "inf"
+			end
+			return double(self)
+		end
+		return calc(self, other.y - self.y, other.x - self.x, other.x)
+	end
+
+	local function mult(self, e)
+		e = BIGNUM.mod(e, order)
+		e = BIGNUM.copy(e)
+		local result, q = "inf", self
+		local progress = 0
+		io.write("Calculating BTC pubkey (32 steps)")
+		io.flush()
+		while e ~= zero do
+			if bit.band(e[1],1) == 1 then
+				result = add(result, q)
+			end
+			BIGNUM.rshift(e, 1)
+			q = double(q)
+			--print("result", result.x, result.y)
+			if progress % 8 == 0 then
+				io.write(".")
+				io.flush()
+			end
+			progress = progress + 1
+		end
+		print("done")
+		return result
+	end
+	local pubkey = mult(g, secret)
+	return {x=BIGNUM.to_dwords(pubkey.x,8), y=BIGNUM.to_dwords(pubkey.y,8)}	
+end
+
+BIGNUM = load_bignum()
 
 local WORDLIST = {
 	[0]="abandon", "ability", "able", "about", "above", "absent", "absorb", "abstract", "absurd", "abuse", "access", "accident", "account", "accuse", "achieve", "acid", "acoustic", "acquire", "across", "act", "action", "actor", "actress", "actual", "adapt", "add", "addict", "address", "adjust", "admit", "adult", "advance", "advice", "aerobic", "affair", "afford", "afraid", "again", "age", "agent", "agree", "ahead", "aim", "air", "airport", "aisle", "alarm", "album", "alcohol", "alert", "alien", "all", "alley", "allow", "almost", "alone", "alpha", "already", "also", "alter", "always", "amateur", "amazing", "among", "amount", "amused", "analyst", "anchor", "ancient", "anger", "angle", "angry", "animal", "ankle", "announce", "annual", "another", "answer", "antenna", "antique", "anxiety", "any", "apart", "apology", "appear", "apple", "approve", "april", "arch", "arctic", "area", "arena", "argue", "arm", "armed", "armor", "army", "around", "arrange", "arrest", "arrive", "arrow", "art", "artefact", "artist", "artwork", "ask", "aspect", "assault", "asset", "assist", "assume", "asthma", "athlete", "atom", "attack", "attend", "attitude", "attract", "auction", "audit", "august", "aunt", "author", "auto", "autumn", "average", "avocado", "avoid", "awake", "aware", "away", "awesome", "awful", "awkward", "axis", "baby", "bachelor", "bacon", "badge", "bag", "balance", "balcony", "ball", "bamboo", "banana", "banner", "bar", "barely", "bargain", "barrel", "base", "basic", "basket", "battle", "beach", "bean", "beauty", "because", "become", "beef", "before", "begin", "behave", "behind", "believe", "below", "belt", "bench", "benefit", "best", "betray", "better", "between", "beyond", "bicycle", "bid", "bike", "bind", "biology", "bird", "birth", "bitter", "black", "blade", "blame", "blanket", "blast", "bleak", "bless", "blind", "blood", "blossom", "blouse", "blue", "blur", "blush", "board", "boat", "body", "boil", "bomb", "bone", "bonus", "book", "boost", "border", "boring", "borrow", "boss", "bottom", "bounce", "box", "boy", "bracket", "brain", "brand", "brass", "brave", "bread", "breeze", "brick", "bridge", "brief", "bright", "bring", "brisk", "broccoli", "broken", "bronze", "broom", "brother", "brown", "brush", "bubble", "buddy", "budget", "buffalo", "build", "bulb", "bulk", "bullet", "bundle", "bunker", "burden", "burger", "burst", "bus", "business", "busy", "butter", "buyer", "buzz", "cabbage", "cabin", "cable", "cactus", "cage", "cake", "call", "calm", "camera", "camp", "can", "canal", "cancel", "candy", "cannon", "canoe", "canvas", "canyon", "capable", "capital", "captain", "car", "carbon", "card", "cargo", "carpet", "carry", "cart", "case", "cash", "casino", "castle", "casual", "cat", "catalog", "catch", "category", "cattle", "caught", "cause", "caution", "cave", "ceiling", "celery", "cement", "census", "century", "cereal", "certain", "chair", "chalk", "champion", "change", "chaos", "chapter", "charge", "chase", "chat", "cheap", "check", "cheese", "chef", "cherry", "chest", "chicken", "chief", "child", "chimney", "choice", "choose", "chronic", "chuckle", "chunk", "churn", "cigar", "cinnamon", "circle", "citizen", "city", "civil", "claim", "clap", "clarify", "claw", "clay", "clean", "clerk", "clever", "click", "client", "cliff", "climb", "clinic", "clip", "clock", "clog", "close", "cloth", "cloud", "clown", "club", "clump", "cluster", "clutch", "coach", "coast", "coconut", "code", "coffee", "coil", "coin", "collect", "color", "column", "combine", "come", "comfort", "comic", "common", "company", "concert", "conduct", "confirm", "congress", "connect", "consider", "control", "convince", "cook", "cool", "copper", "copy", "coral", "core", "corn", "correct", "cost", "cotton", "couch", "country", "couple", "course", "cousin", "cover", "coyote", "crack", "cradle", "craft", "cram", "crane", "crash", "crater", "crawl", "crazy", "cream", "credit", "creek", "crew", "cricket", "crime", "crisp", "critic", "crop", "cross", "crouch", "crowd", "crucial", "cruel", "cruise", "crumble", "crunch", "crush", "cry", "crystal", "cube", "culture", "cup", "cupboard", "curious", "current", "curtain", "curve", "cushion", "custom", "cute", "cycle", "dad", "damage", "damp", "dance", "danger", "daring", "dash", "daughter", "dawn", "day", "deal", "debate", "debris", "decade", "december", "decide", "decline", "decorate", "decrease", "deer", "defense", "define", "defy", "degree", "delay", "deliver", "demand", "demise", "denial", "dentist", "deny", "depart", "depend", "deposit", "depth", "deputy", "derive", "describe", "desert", "design", "desk", "despair", "destroy", "detail", "detect", "develop", "device", "devote", "diagram", "dial", "diamond", "diary", "dice", "diesel", "diet", "differ", "digital", "dignity", "dilemma", "dinner", "dinosaur", "direct", "dirt", "disagree", "discover", "disease", "dish", "dismiss", "disorder", "display", "distance", "divert", "divide", "divorce", "dizzy", "doctor", "document", "dog", "doll", "dolphin", "domain", "donate", "donkey", "donor", "door", "dose", "double", "dove", "draft", "dragon", "drama", "drastic", "draw", "dream", "dress", "drift", "drill", "drink", "drip", "drive", "drop", "drum", "dry", "duck", "dumb", "dune", "during", "dust", "dutch", "duty", "dwarf", "dynamic", "eager", "eagle", "early", "earn", "earth", "easily", "east", "easy", "echo", "ecology", "economy", "edge", "edit", "educate", "effort", "egg", "eight", "either", "elbow", "elder", "electric", "elegant", "element", "elephant", "elevator", "elite", "else", "embark", "embody", "embrace", "emerge", "emotion", "employ", "empower", "empty", "enable", "enact", "end", "endless", "endorse", "enemy", "energy", "enforce", "engage", "engine", "enhance", "enjoy", "enlist", "enough", "enrich", "enroll", "ensure", "enter", "entire", "entry", "envelope", "episode", "equal", "equip", "era", "erase", "erode", "erosion", "error", "erupt", "escape", "essay", "essence", "estate", "eternal", "ethics", "evidence", "evil", "evoke", "evolve", "exact", "example", "excess", "exchange", "excite", "exclude", "excuse", "execute", "exercise", "exhaust", "exhibit", "exile", "exist", "exit", "exotic", "expand", "expect", "expire", "explain", "expose", "express", "extend", "extra", "eye", "eyebrow", "fabric", "face", "faculty", "fade", "faint", "faith", "fall", "false", "fame", "family", "famous", "fan", "fancy", "fantasy", "farm", "fashion", "fat", "fatal", "father", "fatigue", "fault", "favorite", "feature", "february", "federal", "fee", "feed", "feel", "female", "fence", "festival", "fetch", "fever", "few", "fiber", "fiction", "field", "figure", "file", "film", "filter", "final", "find", "fine", "finger", "finish", "fire", "firm", "first", "fiscal", "fish", "fit", "fitness", "fix", "flag", "flame", "flash", "flat", "flavor", "flee", "flight", "flip", "float", "flock", "floor", "flower", "fluid", "flush", "fly", "foam", "focus", "fog", "foil", "fold", "follow", "food", "foot", "force", "forest", "forget", "fork", "fortune", "forum", "forward", "fossil", "foster", "found", "fox", "fragile", "frame", "frequent", "fresh", "friend", "fringe", "frog", "front", "frost", "frown", "frozen", "fruit", "fuel", "fun", "funny", "furnace", "fury", "future", "gadget", "gain", "galaxy", "gallery", "game", "gap", "garage", "garbage", "garden", "garlic", "garment", "gas", "gasp", "gate", "gather", "gauge", "gaze", "general", "genius", "genre", "gentle", "genuine", "gesture", "ghost", "giant", "gift", "giggle", "ginger", "giraffe", "girl", "give", "glad", "glance", "glare", "glass", "glide", "glimpse", "globe", "gloom", "glory", "glove", "glow", "glue", "goat", "goddess", "gold", "good", "goose", "gorilla", "gospel", "gossip", "govern", "gown", "grab", "grace", "grain", "grant", "grape", "grass", "gravity", "great", "green", "grid", "grief", "grit", "grocery", "group", "grow", "grunt", "guard", "guess", "guide", "guilt", "guitar", "gun", "gym", "habit", "hair", "half", "hammer", "hamster", "hand", "happy", "harbor", "hard", "harsh", "harvest", "hat", "have", "hawk", "hazard", "head", "health", "heart", "heavy", "hedgehog", "height", "hello", "helmet", "help", "hen", "hero", "hidden", "high", "hill", "hint", "hip", "hire", "history", "hobby", "hockey", "hold", "hole", "holiday", "hollow", "home", "honey", "hood", "hope", "horn", "horror", "horse", "hospital", "host", "hotel", "hour", "hover", "hub", "huge", "human", "humble", "humor", "hundred", "hungry", "hunt", "hurdle", "hurry", "hurt", "husband", "hybrid", "ice", "icon", "idea", "identify", "idle", "ignore", "ill", "illegal", "illness", "image", "imitate", "immense", "immune", "impact", "impose", "improve", "impulse", "inch", "include", "income", "increase", "index", "indicate", "indoor", "industry", "infant", "inflict", "inform", "inhale", "inherit", "initial", "inject", "injury", "inmate", "inner", "innocent", "input", "inquiry", "insane", "insect", "inside", "inspire", "install", "intact", "interest", "into", "invest", "invite", "involve", "iron", "island", "isolate", "issue", "item", "ivory", "jacket", "jaguar", "jar", "jazz", "jealous", "jeans", "jelly", "jewel", "job", "join", "joke", "journey", "joy", "judge", "juice", "jump", "jungle", "junior", "junk", "just", "kangaroo", "keen", "keep", "ketchup", "key", "kick", "kid", "kidney", "kind", "kingdom", "kiss", "kit", "kitchen", "kite", "kitten", "kiwi", "knee", "knife", "knock", "know", "lab", "label", "labor", "ladder", "lady", "lake", "lamp", "language", "laptop", "large", "later", "latin", "laugh", "laundry", "lava", "law", "lawn", "lawsuit", "layer", "lazy", "leader", "leaf", "learn", "leave", "lecture", "left", "leg", "legal", "legend", "leisure", "lemon", "lend", "length", "lens", "leopard", "lesson", "letter", "level", "liar", "liberty", "library", "license", "life", "lift", "light", "like", "limb", "limit", "link", "lion", "liquid", "list", "little", "live", "lizard", "load", "loan", "lobster", "local", "lock", "logic", "lonely", "long", "loop", "lottery", "loud", "lounge", "love", "loyal", "lucky", "luggage", "lumber", "lunar", "lunch", "luxury", "lyrics", "machine", "mad", "magic", "magnet", "maid", "mail", "main", "major", "make", "mammal", "man", "manage", "mandate", "mango", "mansion", "manual", "maple", "marble", "march", "margin", "marine", "market", "marriage", "mask", "mass", "master", "match", "material", "math", "matrix", "matter", "maximum", "maze", "meadow", "mean", "measure", "meat", "mechanic", "medal", "media", "melody", "melt", "member", "memory", "mention", "menu", "mercy", "merge", "merit", "merry", "mesh", "message", "metal", "method", "middle", "midnight", "milk", "million", "mimic", "mind", "minimum", "minor", "minute", "miracle", "mirror", "misery", "miss", "mistake", "mix", "mixed", "mixture", "mobile", "model", "modify", "mom", "moment", "monitor", "monkey", "monster", "month", "moon", "moral", "more", "morning", "mosquito", "mother", "motion", "motor", "mountain", "mouse", "move", "movie", "much", "muffin", "mule", "multiply", "muscle", "museum", "mushroom", "music", "must", "mutual", "myself", "mystery", "myth", "naive", "name", "napkin", "narrow", "nasty", "nation", "nature", "near", "neck", "need", "negative", "neglect", "neither", "nephew", "nerve", "nest", "net", "network", "neutral", "never", "news", "next", "nice", "night", "noble", "noise", "nominee", "noodle", "normal", "north", "nose", "notable", "note", "nothing", "notice", "novel", "now", "nuclear", "number", "nurse", "nut", "oak", "obey", "object", "oblige", "obscure", "observe", "obtain", "obvious", "occur", "ocean", "october", "odor", "off", "offer", "office", "often", "oil", "okay", "old", "olive", "olympic", "omit", "once", "one", "onion", "online", "only", "open", "opera", "opinion", "oppose", "option", "orange", "orbit", "orchard", "order", "ordinary", "organ", "orient", "original", "orphan", "ostrich", "other", "outdoor", "outer", "output", "outside", "oval", "oven", "over", "own", "owner", "oxygen", "oyster", "ozone", "pact", "paddle", "page", "pair", "palace", "palm", "panda", "panel", "panic", "panther", "paper", "parade", "parent", "park", "parrot", "party", "pass", "patch", "path", "patient", "patrol", "pattern", "pause", "pave", "payment", "peace", "peanut", "pear", "peasant", "pelican", "pen", "penalty", "pencil", "people", "pepper", "perfect", "permit", "person", "pet", "phone", "photo", "phrase", "physical", "piano", "picnic", "picture", "piece", "pig", "pigeon", "pill", "pilot", "pink", "pioneer", "pipe", "pistol", "pitch", "pizza", "place", "planet", "plastic", "plate", "play", "please", "pledge", "pluck", "plug", "plunge", "poem", "poet", "point", "polar", "pole", "police", "pond", "pony", "pool", "popular", "portion", "position", "possible", "post", "potato", "pottery", "poverty", "powder", "power", "practice", "praise", "predict", "prefer", "prepare", "present", "pretty", "prevent", "price", "pride", "primary", "print", "priority", "prison", "private", "prize", "problem", "process", "produce", "profit", "program", "project", "promote", "proof", "property", "prosper", "protect", "proud", "provide", "public", "pudding", "pull", "pulp", "pulse", "pumpkin", "punch", "pupil", "puppy", "purchase", "purity", "purpose", "purse", "push", "put", "puzzle", "pyramid", "quality", "quantum", "quarter", "question", "quick", "quit", "quiz", "quote", "rabbit", "raccoon", "race", "rack", "radar", "radio", "rail", "rain", "raise", "rally", "ramp", "ranch", "random", "range", "rapid", "rare", "rate", "rather", "raven", "raw", "razor", "ready", "real", "reason", "rebel", "rebuild", "recall", "receive", "recipe", "record", "recycle", "reduce", "reflect", "reform", "refuse", "region", "regret", "regular", "reject", "relax", "release", "relief", "rely", "remain", "remember", "remind", "remove", "render", "renew", "rent", "reopen", "repair", "repeat", "replace", "report", "require", "rescue", "resemble", "resist", "resource", "response", "result", "retire", "retreat", "return", "reunion", "reveal", "review", "reward", "rhythm", "rib", "ribbon", "rice", "rich", "ride", "ridge", "rifle", "right", "rigid", "ring", "riot", "ripple", "risk", "ritual", "rival", "river", "road", "roast", "robot", "robust", "rocket", "romance", "roof", "rookie", "room", "rose", "rotate", "rough", "round", "route", "royal", "rubber", "rude", "rug", "rule", "run", "runway", "rural", "sad", "saddle", "sadness", "safe", "sail", "salad", "salmon", "salon", "salt", "salute", "same", "sample", "sand", "satisfy", "satoshi", "sauce", "sausage", "save", "say", "scale", "scan", "scare", "scatter", "scene", "scheme", "school", "science", "scissors", "scorpion", "scout", "scrap", "screen", "script", "scrub", "sea", "search", "season", "seat", "second", "secret", "section", "security", "seed", "seek", "segment", "select", "sell", "seminar", "senior", "sense", "sentence", "series", "service", "session", "settle", "setup", "seven", "shadow", "shaft", "shallow", "share", "shed", "shell", "sheriff", "shield", "shift", "shine", "ship", "shiver", "shock", "shoe", "shoot", "shop", "short", "shoulder", "shove", "shrimp", "shrug", "shuffle", "shy", "sibling", "sick", "side", "siege", "sight", "sign", "silent", "silk", "silly", "silver", "similar", "simple", "since", "sing", "siren", "sister", "situate", "six", "size", "skate", "sketch", "ski", "skill", "skin", "skirt", "skull", "slab", "slam", "sleep", "slender", "slice", "slide", "slight", "slim", "slogan", "slot", "slow", "slush", "small", "smart", "smile", "smoke", "smooth", "snack", "snake", "snap", "sniff", "snow", "soap", "soccer", "social", "sock", "soda", "soft", "solar", "soldier", "solid", "solution", "solve", "someone", "song", "soon", "sorry", "sort", "soul", "sound", "soup", "source", "south", "space", "spare", "spatial", "spawn", "speak", "special", "speed", "spell", "spend", "sphere", "spice", "spider", "spike", "spin", "spirit", "split", "spoil", "sponsor", "spoon", "sport", "spot", "spray", "spread", "spring", "spy", "square", "squeeze", "squirrel", "stable", "stadium", "staff", "stage", "stairs", "stamp", "stand", "start", "state", "stay", "steak", "steel", "stem", "step", "stereo", "stick", "still", "sting", "stock", "stomach", "stone", "stool", "story", "stove", "strategy", "street", "strike", "strong", "struggle", "student", "stuff", "stumble", "style", "subject", "submit", "subway", "success", "such", "sudden", "suffer", "sugar", "suggest", "suit", "summer", "sun", "sunny", "sunset", "super", "supply", "supreme", "sure", "surface", "surge", "surprise", "surround", "survey", "suspect", "sustain", "swallow", "swamp", "swap", "swarm", "swear", "sweet", "swift", "swim", "swing", "switch", "sword", "symbol", "symptom", "syrup", "system", "table", "tackle", "tag", "tail", "talent", "talk", "tank", "tape", "target", "task", "taste", "tattoo", "taxi", "teach", "team", "tell", "ten", "tenant", "tennis", "tent", "term", "test", "text", "thank", "that", "theme", "then", "theory", "there", "they", "thing", "this", "thought", "three", "thrive", "throw", "thumb", "thunder", "ticket", "tide", "tiger", "tilt", "timber", "time", "tiny", "tip", "tired", "tissue", "title", "toast", "tobacco", "today", "toddler", "toe", "together", "toilet", "token", "tomato", "tomorrow", "tone", "tongue", "tonight", "tool", "tooth", "top", "topic", "topple", "torch", "tornado", "tortoise", "toss", "total", "tourist", "toward", "tower", "town", "toy", "track", "trade", "traffic", "tragic", "train", "transfer", "trap", "trash", "travel", "tray", "treat", "tree", "trend", "trial", "tribe", "trick", "trigger", "trim", "trip", "trophy", "trouble", "truck", "true", "truly", "trumpet", "trust", "truth", "try", "tube", "tuition", "tumble", "tuna", "tunnel", "turkey", "turn", "turtle", "twelve", "twenty", "twice", "twin", "twist", "two", "type", "typical", "ugly", "umbrella", "unable", "unaware", "uncle", "uncover", "under", "undo", "unfair", "unfold", "unhappy", "uniform", "unique", "unit", "universe", "unknown", "unlock", "until", "unusual", "unveil", "update", "upgrade", "uphold", "upon", "upper", "upset", "urban", "urge", "usage", "use", "used", "useful", "useless", "usual", "utility", "vacant", "vacuum", "vague", "valid", "valley", "valve", "van", "vanish", "vapor", "various", "vast", "vault", "vehicle", "velvet", "vendor", "venture", "venue", "verb", "verify", "version", "very", "vessel", "veteran", "viable", "vibrant", "vicious", "victory", "video", "view", "village", "vintage", "violin", "virtual", "virus", "visa", "visit", "visual", "vital", "vivid", "vocal", "voice", "void", "volcano", "volume", "vote", "voyage", "wage", "wagon", "wait", "walk", "wall", "walnut", "want", "warfare", "warm", "warrior", "wash", "wasp", "waste", "water", "wave", "way", "wealth", "weapon", "wear", "weasel", "weather", "web", "wedding", "weekend", "weird", "welcome", "west", "wet", "whale", "what", "wheat", "wheel", "when", "where", "whip", "whisper", "wide", "width", "wife", "wild", "will", "win", "window", "wine", "wing", "wink", "winner", "winter", "wire", "wisdom", "wise", "wish", "witness", "wolf", "woman", "wonder", "wood", "wool", "word", "work", "world", "worry", "worth", "wrap", "wreck", "wrestle", "wrist", "write", "wrong", "yard", "year", "yellow", "you", "young", "youth", "zebra", "zero", "zone", "zoo"
@@ -59,6 +642,7 @@ local function bin_to_any_module()
 	end
 
 	local function display(num, alphabet0, pad)
+		--print("pad", pad)
 		local digits = #num
 		local alph = _M.alphabets[alphabet0]
 		if not alph then
@@ -82,7 +666,7 @@ local function bin_to_any_module()
 		return table.concat(res)
 	end
 
-	function _M.convert(generator_or_dwords, base_or_alphabet, maybe_pad)
+	function _M.convert(generator_or_chars, base_or_alphabet, maybe_pad)
 		local base, alphabet
 		if type(base_or_alphabet) == "number" then
 			base = base_or_alphabet
@@ -91,19 +675,16 @@ local function bin_to_any_module()
 			base = #base_or_alphabet
 			alphabet = base_or_alphabet
 		end
-		local generator = generator_or_dwords
-		if type(generator) == "table" then
-			local dwords = generator_or_dwords
+		local generator = generator_or_chars
+		if type(generator) == "string" then
+			local str = generator_or_chars
 			generator = coroutine.wrap(function()
-				for ind = #dwords, 1, -1 do
-					local dword = dwords[ind]
-					for bitn = 1, 32 do
-						if bit.band(dword,1) == 1 then
-							coroutine.yield(1)
-						else
-							coroutine.yield(0)
-						end
-						dword = bit.rshift(dword,1)
+				for ind = #str, 1, -1 do
+					local byte = string.byte(str:sub(ind))
+					--print("byte", string.format("%02x", byte))
+					for bitn = 1, 8 do
+						coroutine.yield(bit.band(byte,1))
+						byte = bit.rshift(byte,1)
 					end
 				end
 			end)
@@ -202,8 +783,11 @@ local function get256bits(rand)
 	return dwords
 end
 
-local function to_base58(dwords)
-	return (BIN_TO_ANY.convert(dwords,"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"))
+local function to_base58(dwords_or_chars)
+	if type(dwords_or_chars) == "table" then
+		dwords_or_chars = dwords_to_chars(dwords_or_chars)
+	end
+	return (BIN_TO_ANY.convert(dwords_or_chars,"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"))
 end
 
 local function to_bin(dwords)
@@ -625,9 +1209,28 @@ local function calibrate()
 	end
 end
 
-local function btc_key(dwords)
+local function base58check(str)
+	local chk = (sha256(str, "dwords"))
+	chk = sha256(dwords_to_chars(chk),"dwords")[1]
+	for i = 1, 4 do
+		chk = rol(chk, 8)
+		str = str .. string.char(band(chk, 0xff))
+	end
+	--print(#str)
+	local zeroes = 0
+	for i=1, #str do
+		if str:sub(i,i) == "\000" then
+			zeroes = zeroes + 1
+		else
+			break
+		end
+	end
+	return string.rep("1",zeroes)..to_base58(str)
+end
+
+local function btc_privkey(dwords)
 	if (dwords[1] == 0 or dwords[1] == 0xffffffff) and (dwords[1] == dwords[2]) and (dwords[2] == dwords[3]) then
-		print("?!?!?!?!?! First 3 dwords are the same !?!?!?!?!?!?! BTC key could be invalid") --Hmm, LOL
+		print("?!?!?!?!?! First 3 dwords are the same !?!?!?!?!?!?! BTC key very suspicious") --Hmm, LOL
 	end
 	local result = {}
 	for ii, typ in ipairs{"compressed", "uncompressed"} do
@@ -635,18 +1238,33 @@ local function btc_key(dwords)
 		if typ == "compressed" then
 			str = str .. string.char(0x01)
 		end
-		local chk = (sha256(str, "dwords"))
-		chk = sha256(dwords_to_chars(chk),"dwords")[1]
-		for i = 1, 4 do
-			chk = rol(chk, 8)
-			str = str .. string.char(band(chk, 0xff))
-		end
-		result[typ] = to_base58(chars_to_dwords(str))
+		result[typ] = base58check(str)
 	end
 	return result
 end
 
-local function test()
+local function wif(dwpubkey, comp)
+	local str
+	if comp ~= "compressed" then
+		str = "\004"..dwords_to_chars(dwpubkey.x)..dwords_to_chars(dwpubkey.y)
+		assert(#str == 65)
+	else --compressed
+		str = dwords_to_chars(dwpubkey.x)
+		if bit.band(dwpubkey.y[8],1) == 0 then
+			str = "\002" .. str
+		else
+			str = "\003" .. str
+		end
+		assert(#str == 33)
+	end
+	local step2 = sha256(str, "dwords")
+	local step3 = ripemd160(dwords_to_chars(step2), "dwords")
+	local step4 = "\000"..dwords_to_chars(step3)
+	return(base58check(step4))
+end
+
+local function test(opts)
+	print("Running self-tests.")
 	assert(to_binstr(7)=="00000000000000000000000000000111")
 	local bs = bitstream{1,1,1,0,0,0,1,1,1,0,0,0}
 	assert(bs(4) == 14)
@@ -683,15 +1301,24 @@ local function test()
 	assert(dwords_to_password(key) == "VXEy@N)F?Vm4FVjMaJZi6TjfuPbHRnJumUy54b6h")
 
 	assert(hex256(keymaster("Satan",2),"-") == "16784c4f-eb122684-376d1d73-375adccd-133b10cf-4ef0bac3-abe34427-a09aecd2")
-	assert(BIN_TO_ANY.convert({0x12345678,0xffffffff},"0123456789abcdef") == "12345678ffffffff")
+	assert(BIN_TO_ANY.convert(dwords_to_chars({0x12345678,0xffffffff}),"0123456789abcdef") == "12345678ffffffff")
 	assert(to_base58({0x80, 0x32247122, 0xF9FF8BB7, 0x8BBEFC55, 0x4E729121, 0x24410788, 0x2417AF0D, 0x77EB7A22, 0x784171F2, 0xAB079763}) == "5JCNQBno4UP562LCEXMTr72WVUe315rrXzPqAFiap8zQNjzarbL")
-	local btckeys = btc_key(keymaster("Satan",1),"-")
-	assert(btckeys.compressed == "Ky63MMQWPEYLpG5rbbSxDbtAwfzaNDvKzH2co6QXKg7mFJHft5TS")
-	assert(btckeys.uncompressed == "5JEq7RZWmTdZ8Y4NCv7nb7zp7VmmGEMEpR2Gp9UXtMeL65u7vyv")
+	if opts.no_btc then
+		print("Skipping BTC tests.")
+	else
+		BIGNUM.test()
+		local btckeys = btc_privkey(keymaster("Satan",1),"-")
+		assert(btckeys.compressed == "Ky63MMQWPEYLpG5rbbSxDbtAwfzaNDvKzH2co6QXKg7mFJHft5TS")
+		assert(btckeys.uncompressed == "5JEq7RZWmTdZ8Y4NCv7nb7zp7VmmGEMEpR2Gp9UXtMeL65u7vyv")
+		local dwpubkey = privkey_to_pubkey("0x2EE42A735AE3D0C1A7E435EF3B4731B0205A7839015E100BCC8472EE989EC887")
+		assert(wif(dwpubkey, "uncompressed") == "1MNQH6Xi8Ltf1TfgDWYNijZaiPdVGxPSZw")
+		assert(wif(dwpubkey, "compressed") == "1BMwnCKvHD9KMHa1Acb2BsisMuM1XRwjvU")
+	end
+	print("All self-tests OK")
 end
 
 local function parse_options()
-	local allowed = {"difficulty", "salt", "test", "checksum"}
+	local allowed = {"difficulty", "salt", "test", "checksum", "no_btc"}
 	for i, opt in ipairs(allowed) do
 		allowed[opt] = true
 	end
@@ -720,8 +1347,7 @@ local function main()
 	BIN_TO_ANY = bin_to_any_module()
 	local opts = parse_options()
 	if opts.test then
-		test()
-		print("All self-tests OK")
+		test(opts)
 		os.exit()
 	end
 
@@ -750,8 +1376,7 @@ local function main()
 	end
 
 	print("STARTING!")
-	test()
-	print("Self-tests OK")
+	test(opts)
 	print("SALT='"..SALT.."' ("..#SALT.." characters)")
 	assert(type(SALT) == "string", "SALT is not string")
 	if #SALT == 0 then
@@ -800,9 +1425,18 @@ local function main()
 		assert(#result == 8)
 		print("256bit hex number: "..hex256(result))
 		print("With spaces: "..hex256(result," "))
-		local btckeys = btc_key(result)
+		local pubkey
+		if not opts.no_btc then
+			pubkey = privkey_to_pubkey("0x"..hex256(result))
+		end
+		local privkeys = btc_privkey(result)
 		for ind, typ in ipairs {"compressed", "uncompressed"} do
-			print(string.format("BTC privkey (%s): %s", typ, btckeys[typ]))
+			print(string.format("BTC WIF privkey (%s): %s", typ, privkeys[typ]))
+			if pubkey then
+				print(string.format("Corresponding BTC address (%s): %s", typ, wif(pubkey, typ)))
+			else
+				print("("..typ.." BTC address generation disabled by user option)")
+			end
 		end
 		print("40 chars password: "..dwords_to_password(result))
 		print("15 chars password: "..dwords_to_password(result,3))
