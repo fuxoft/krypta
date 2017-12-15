@@ -1,5 +1,5 @@
 #!/usr/bin/env luajit
---version 20171211
+--version 20171215
 
 --[[
 	Set the SALT to something you can easily remember.
@@ -1388,7 +1388,7 @@ local function main()
 	end
 	print("Please enter your super-secret MASTER PASSPHRASE:")
 	local masterpp = io.read()
-	print("Please enter it again:")
+--	print("Please enter it again:")
 --	local masterpp2 = io.read()
 --	assert(masterpp == masterpp2, "Passphrase mismatch")
 	for i = 1, 200 do
@@ -1420,8 +1420,14 @@ local function main()
 		print("Enter index (default='')")
 		local index = assert(io.read())
 		print(string.format("Index = '%s' (%s chars)", index, #index))
+		if index:match(":") then
+			print("WARNING: Colon character (':') in index is reserved for special future use, do not use it now!")
+		end	
 		local rnd = new_random(sha256(index..zeroes..strseed0,"dwords"))
 		local result = get256bits(rnd)
+		local ichksum = sha256(strseed0..zeroes..dwords_to_chars(result)..zeroes.."index checksum", "dwords")
+		local chw1, chw2 = band(ichksum[1], 0x7ff), band(ichksum[2], 0x7ff)
+		print(string.format("Checkwords for this specific master passphrase and index: '%s %s'", WORDLIST[chw1], WORDLIST[chw2]))
 		assert(#result == 8)
 		print("256bit hex number: "..hex256(result))
 		print("With spaces: "..hex256(result," "))
