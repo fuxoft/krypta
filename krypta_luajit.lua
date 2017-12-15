@@ -1263,6 +1263,12 @@ local function wif(dwpubkey, comp)
 	return(base58check(step4))
 end
 
+local function checkwords(str)
+	local ichksum = sha256(str.."\000checkwords", "dwords")
+	local chw1, chw2 = band(ichksum[1], 0x7ff), band(ichksum[2], 0x7ff)
+	return WORDLIST[chw1] .. " " .. WORDLIST[chw2]
+end
+
 local function test(opts)
 	print("Running self-tests.")
 	assert(to_binstr(7)=="00000000000000000000000000000111")
@@ -1303,6 +1309,7 @@ local function test(opts)
 	assert(hex256(keymaster("Satan",2),"-") == "16784c4f-eb122684-376d1d73-375adccd-133b10cf-4ef0bac3-abe34427-a09aecd2")
 	assert(BIN_TO_ANY.convert(dwords_to_chars({0x12345678,0xffffffff}),"0123456789abcdef") == "12345678ffffffff")
 	assert(to_base58({0x80, 0x32247122, 0xF9FF8BB7, 0x8BBEFC55, 0x4E729121, 0x24410788, 0x2417AF0D, 0x77EB7A22, 0x784171F2, 0xAB079763}) == "5JCNQBno4UP562LCEXMTr72WVUe315rrXzPqAFiap8zQNjzarbL")
+	assert(checkwords("Homopes") == "devote asthma")
 	if opts.no_btc then
 		print("Skipping BTC tests.")
 	else
@@ -1427,7 +1434,7 @@ local function main()
 		local result = get256bits(rnd)
 		local ichksum = sha256(strseed0..zeroes..dwords_to_chars(result)..zeroes.."index checksum", "dwords")
 		local chw1, chw2 = band(ichksum[1], 0x7ff), band(ichksum[2], 0x7ff)
-		print(string.format("Checkwords for this specific master passphrase and index: '%s %s'", WORDLIST[chw1], WORDLIST[chw2]))
+		print(string.format("Checkwords for this specific master passphrase and index: '%s'", checkwords(strseed0..dwords_to_chars(result))))
 		assert(#result == 8)
 		print("256bit hex number: "..hex256(result))
 		print("With spaces: "..hex256(result," "))
