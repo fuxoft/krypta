@@ -1,6 +1,6 @@
 #!/usr/bin/env luajit
 -- https://github.com/fuxoft/krypta
--- version 20171215c
+-- [[[[*<= Version '20171215f' =>*]]]]
 
 --[[
 	Set the SALT to something you can easily remember.
