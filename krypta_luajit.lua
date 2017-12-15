@@ -1263,10 +1263,17 @@ local function wif(dwpubkey, comp)
 	return(base58check(step4))
 end
 
-local function checkwords(str)
+local function checkwords(str, howmany)
+	if not howmany then
+		howmany = 2
+	end
+	assert(howmany >= 1 and howmany <=8)
 	local ichksum = sha256(str.."\000checkwords", "dwords")
-	local chw1, chw2 = band(ichksum[1], 0x7ff), band(ichksum[2], 0x7ff)
-	return WORDLIST[chw1] .. " " .. WORDLIST[chw2]
+	local result = {}
+	for i = 1, howmany do
+		result[i] = assert(WORDLIST[band(ichksum[i], 0x7ff)])
+	end
+	return table.concat(result, " ")
 end
 
 local function test(opts)
@@ -1424,37 +1431,79 @@ local function main()
 	local strseed0 = dwords_to_chars(masterkey)
 	while true do
 		print("\n----------------------------------")
-		print("Enter index (default='')")
-		local index = assert(io.read())
-		print(string.format("Index = '%s' (%s chars)", index, #index))
-		if index:match(":") then
-			print("WARNING: Colon character (':') in index is reserved for special future use, do not use it now!")
-		end	
-		local rnd = new_random(sha256(index..zeroes..strseed0,"dwords"))
-		local result = get256bits(rnd)
-		local ichksum = sha256(strseed0..zeroes..dwords_to_chars(result)..zeroes.."index checksum", "dwords")
-		local chw1, chw2 = band(ichksum[1], 0x7ff), band(ichksum[2], 0x7ff)
-		print(string.format("Checkwords for this specific master passphrase and index: '%s'", checkwords(strseed0..dwords_to_chars(result))))
-		assert(#result == 8)
-		print("256bit hex number: "..hex256(result))
-		print("With spaces: "..hex256(result," "))
-		local pubkey
-		if not opts.no_btc then
-			pubkey = privkey_to_pubkey("0x"..hex256(result))
-		end
-		local privkeys = btc_privkey(result)
-		for ind, typ in ipairs {"compressed", "uncompressed"} do
-			print(string.format("BTC WIF privkey (%s): %s", typ, privkeys[typ]))
-			if pubkey then
-				print(string.format("Corresponding BTC address (%s): %s", typ, wif(pubkey, typ)))
+		print("Enter index with optional 'prefix:' (default='')")
+		local ind0 = assert(io.read())
+		local prefix, index = ind0:match("^(.+):(.+)$")
+		local show = {hex = true, btcc = true, btcu = true, pwd15 = true, pwd40 = true, wrd12 = true, wrd24 = true}
+
+		if index then
+			if not show[prefix] then
+				print("Error: Prefix '"..prefix.."' is invalid.")
+				show = false
 			else
-				print("("..typ.." BTC address generation disabled by user option)")
+				show = {[prefix] = true}
 			end
+		else
+			--Show everything
+			index = ind0
 		end
-		print("40 chars password: "..dwords_to_password(result))
-		print("15 chars password: "..dwords_to_password(result,3))
-		print("BIP39/12: "..bip39{result[1], result[2], result[3], result[4]})
-		print("BIP39/24: "..bip39(result))
+
+		if index:match(":") then
+			print("Error: Colon (':') detected but no valid prefix and index.")
+			show = false
+		end
+
+		if show then
+			print(string.format("Entered index string: '%s' (%s chars)", index, #index))
+			local rnd = new_random(sha256(index..zeroes..strseed0,"dwords"))
+			local result = get256bits(rnd)
+			assert(#result == 8)
+			local ichksum = sha256(strseed0..zeroes..dwords_to_chars(result)..zeroes.."index checksum", "dwords")
+			local chw1, chw2 = band(ichksum[1], 0x7ff), band(ichksum[2], 0x7ff)
+			if prefix then
+				print(string.format("Checkwords for this specific master passphrase, index and prefix: '%s'", checkwords(strseed0..dwords_to_chars(result)..prefix, 3)))
+			else
+				print(string.format("Checkwords for this specific master passphrase and index: '%s'", checkwords(strseed0..dwords_to_chars(result))))
+			end
+
+			if show.hex then
+				print("(hex:) 256bit hex number: "..hex256(result))
+				print("(hex:) With spaces: "..hex256(result," "))
+			end
+			local pubkey
+			if not opts.no_btc and (show.btcc or show.btcu) then
+				pubkey = privkey_to_pubkey("0x"..hex256(result))
+			end
+			local privkeys = btc_privkey(result)
+			for ind, typ in ipairs {"compressed", "uncompressed"} do
+				local key = "btcc"
+				if typ == "uncompressed" then
+					key = "btcu"
+				end
+				if show[key] then
+					print(string.format("(%s:) BTC WIF privkey (%s): %s", key, typ, privkeys[typ]))
+					if pubkey then
+						print(string.format("(%s:) Corresponding BTC address (%s): %s", key, typ, wif(pubkey, typ)))
+					else
+						print("("..typ.." BTC address generation disabled by 'no_btc' user option)")
+					end
+				end
+			end
+			if show.pwd15 then
+				print("(pwd15:) 15 chars password: "..dwords_to_password(result,3))
+			end
+			if show.pwd40 then
+				print("(pwd40:) 40 chars password: "..dwords_to_password(result))
+			end
+			if show.wrd12 then
+				print("(wrd12:) BIP39/12: "..bip39{result[1], result[2], result[3], result[4]})
+			end
+			if show.wrd24 then
+				print("(wrd24:) BIP39/24: "..bip39(result))
+			end
+		else
+			print("Nothing to show. Enter valid prefix or leave the prefix out.")
+		end
 	end
 end
 
