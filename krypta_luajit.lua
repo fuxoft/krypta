@@ -1,6 +1,5 @@
 #!/usr/bin/env luajit
 -- https://github.com/fuxoft/krypta
--- [[[[*<= Version '20171215f' =>*]]]]
 
 --[[
 	Set the SALT to something you can easily remember.
@@ -12,8 +11,9 @@
 local SALT = "" --Put the SALT between the quotes.
 local DIFFICULTY = 0 --Put desired difficulty here
 local CHECKSUM = nil --Put three digit hex checksum here - for example 0x123
-
 local MAXDIFC = 31
+
+_G.VERSION = string.match([[*<= Version '20171216a' =>*]], "'(.*)'")
 
 local bxor, band, bor, ror, rol, tohex, tobit, bnot, rshift, lshift = bit.bxor, bit.band, bit.bor, bit.ror, bit.rol, bit.tohex, bit.tobit, bit.bnot, bit.rshift, bit.lshift
 
@@ -1359,6 +1359,7 @@ local function parse_options()
 end
 
 local function main()
+	print("KRYPTA version ".._G.VERSION)
 	BIN_TO_ANY = bin_to_any_module()
 	local opts = parse_options()
 	if opts.test then
