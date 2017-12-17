@@ -2162,8 +2162,14 @@ local function load_bignum()
 	return _M
 end
 
-local privkey_to_pubkey = function(secret)
-	assert(#secret > 30)
+local pubkey_cache = {}
+
+local privkey_to_pubkey = function(secret0)
+	assert(#secret0 > 30)
+	if pubkey_cache[secret0] then
+		print("Retrieved cached BTC pubkey.")
+		return pubkey_cache[secret0]
+	end
 	local new = BIGNUM.new
 	local zero = BIGNUM.zero
 	local one = new(1)
@@ -2172,7 +2178,7 @@ local privkey_to_pubkey = function(secret)
 	local p = new("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F")
 	local g = {x=new("0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798"), y=new("0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8")}
 	local order = new("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141")
-	secret = new(secret)
+	local secret = new(secret0)
 
 	local function inverse_mod(a)
 		if a < zero or a >= p then
@@ -2249,8 +2255,11 @@ local privkey_to_pubkey = function(secret)
 		print("done")
 		return result
 	end
-	local pubkey = mult(g, secret)
-	return {x=BIGNUM.to_dwords(pubkey.x,8), y=BIGNUM.to_dwords(pubkey.y,8)}	
+
+	local pubkey0 = mult(g, secret)
+	local pubkey = {x=BIGNUM.to_dwords(pubkey0.x,8), y=BIGNUM.to_dwords(pubkey0.y,8)}
+	pubkey_cache[secret0] = pubkey
+	return pubkey
 end
 
 local WORDLIST = {
@@ -3048,7 +3057,7 @@ qr_invert
 		end
 		print("Enter index with optional 'prefix:' (default='')")
 		local ind0 = assert(io.read())
-		local prefix, index = ind0:match("^(.+):(.+)$")
+		local prefix, index = ind0:match("^(.+):(.*)$")
 		if opts.prefix and not prefix then
 			prefix = opts.prefix
 			index = ind0
@@ -3078,6 +3087,9 @@ qr_invert
 
 		if show then
 			print(string.format("Entered index string: '%s' (%s chars)", index, #index))
+			if index == "" then
+				print("WARNING. Index is empty string.")
+			end
 			local rnd = new_random(sha256(index..zeroes..strseed0,"dwords"))
 			local result = get256bits(rnd)
 			assert(#result == 8)
@@ -3116,9 +3128,9 @@ qr_invert
 						local wif = wif(pubkey, typ)
 						print(string.format("(%s:) Corresponding BTC address (%s): %s", key, typ, wif))
 						if prefix then
-							print("--- Public BTC address key QR code:")
+							print("--- Public BTC address QR code:")
 							print(QR.render(wif))
-							print("--- End of public address QR code")
+							print("--- End of public BTC address QR code")
 						end
 					else
 						print("("..typ.." BTC address generation disabled by 'no_btc_addr' user option)")
