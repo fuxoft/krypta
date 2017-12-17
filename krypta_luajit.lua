@@ -13,7 +13,7 @@ local DIFFICULTY = 0 --Put desired difficulty here
 local CHECKSUM = nil --Put three digit hex checksum here - for example 0x123
 local MAXDIFC = 31
 
-_G.VERSION = string.match([[*<= Version '20171216a' =>*]], "'(.*)'")
+_G.VERSION = string.match([[*<= Version '20171217a' =>*]], "'(.*)'")
 
 local bxor, band, bor, ror, rol, tohex, tobit, bnot, rshift, lshift = bit.bxor, bit.band, bit.bor, bit.ror, bit.rol, bit.tohex, bit.tobit, bit.bnot, bit.rshift, bit.lshift
 
@@ -822,6 +822,17 @@ local bitstream = function(rem_bits)
 	end)
 end
 
+local function hex256(dwords, separator)
+	assert(#dwords == 8)
+	separator = separator or ""
+	assert(type(separator)=="string")
+	local res = {}
+	for i = 1, 8 do
+		res[i] = tohex(dwords[i])
+	end
+	return table.concat(res,separator)
+end
+
 --RSA256 implementation from https://github.com/JustAPerson/LuaCrypt/
 --- Round constants
 -- computed as the fractional parts of the cuberoots of the first 64 primes
@@ -930,16 +941,33 @@ local function digest_block256(input, t, H)
 
 end
 
-local function hex256(dwords, separator)
-	assert(#dwords == 8)
-	separator = separator or ""
-	assert(type(separator)=="string")
-	local res = {}
-	for i = 1, 8 do
-		res[i] = tohex(dwords[i])
+--- Calculate the SHA256 digest of a message
+-- Note: sha256() does not use variable names complaint with FIPS 180-2
+--@param `input` the message
+local function sha256(input, format)
+	input  = preprocess256(input);
+	local state  = {
+		0x6a09e667,
+		0xbb67ae85,
+		0x3c6ef372,
+		0xa54ff53a,
+		0x510e527f,
+		0x9b05688c,
+		0x1f83d9ab,
+		0x5be0cd19,
+	}
+
+	for i = 1, #input, 64 do
+		digest_block256(input, i, state);
 	end
-	return table.concat(res,separator)
+
+	if format == "dwords" then
+		return state
+	end
+
+	return hex256(state)
 end
+----- END SHA256
 
 local function ripemd160(input, format)
 	local function swap_endian(dw)
@@ -1043,34 +1071,6 @@ local function ripemd160(input, format)
 	--print(table.concat(result))
 	return table.concat(result)
 end
-
---- Calculate the SHA256 digest of a message
--- Note: sha256() does not use variable names complaint with FIPS 180-2
---@param `input` the message
-local function sha256(input, format)
-	input  = preprocess256(input);
-	local state  = {
-		0x6a09e667,
-		0xbb67ae85,
-		0x3c6ef372,
-		0xa54ff53a,
-		0x510e527f,
-		0x9b05688c,
-		0x1f83d9ab,
-		0x5be0cd19,
-	}
-
-	for i = 1, #input, 64 do
-		digest_block256(input, i, state);
-	end
-
-	if format == "dwords" then
-		return state
-	end
-
-	return hex256(state)
-end
------ END SHA256
 
 local new_shifter = function(state)
 	if tobit(state) == 0 then
@@ -1277,6 +1277,10 @@ local function checkwords(str, howmany)
 	return table.concat(result, " ")
 end
 
+local function get_all_prefixes()
+	return {hex = true, btcc = true, btcu = true, pwd15 = true, pwd40 = true, wrd12 = true, wrd24 = true}
+end
+
 local function test(opts)
 	print("Running self-tests.")
 	assert(to_binstr(7)=="00000000000000000000000000000111")
@@ -1333,7 +1337,7 @@ local function test(opts)
 end
 
 local function parse_options()
-	local allowed = {"difficulty", "salt", "test", "checksum", "no_btc"}
+	local allowed = {"difficulty", "salt", "test", "checksum", "no_btc", "prefix"}
 	for i, opt in ipairs(allowed) do
 		allowed[opt] = true
 	end
@@ -1362,6 +1366,16 @@ local function main()
 	print("KRYPTA version ".._G.VERSION)
 	BIN_TO_ANY = bin_to_any_module()
 	local opts = parse_options()
+
+	if opts.prefix then
+		if opts.prefix:match(":") then
+			error("Do NOT include the colon in prefix.")
+		end
+		if not get_all_prefixes()[opts.prefix] then
+			error("Unknown prefix: "..opts.prefix)
+		end
+	end
+
 	if opts.test then
 		test(opts)
 		os.exit()
@@ -1433,12 +1447,23 @@ local function main()
 	local strseed0 = dwords_to_chars(masterkey)
 	while true do
 		print("\n----------------------------------")
+		if opts.prefix then
+			print("Default prefix is '".. opts.prefix ..":' (override with 'all:')")
+		end
 		print("Enter index with optional 'prefix:' (default='')")
 		local ind0 = assert(io.read())
 		local prefix, index = ind0:match("^(.+):(.+)$")
-		local show = {hex = true, btcc = true, btcu = true, pwd15 = true, pwd40 = true, wrd12 = true, wrd24 = true}
+		if opts.prefix and not prefix then
+			prefix = opts.prefix
+			index = ind0
+		end
+		if prefix == "all" then
+			prefix = nil
+			ind0 = index
+		end
+		local show = get_all_prefixes()
 
-		if index then
+		if index and prefix then
 			if not show[prefix] then
 				print("Error: Prefix '"..prefix.."' is invalid.")
 				show = false
@@ -1465,7 +1490,7 @@ local function main()
 			if prefix then
 				print(string.format("Checkwords for this specific master passphrase, index and prefix (%s:): '%s'", prefix, checkwords(strseed0..dwords_to_chars(result)..prefix, 3)))
 			else
-				print(string.format("Checkwords for this specific master passphrase and index: '%s'", checkwords(strseed0..dwords_to_chars(result))))
+				print(string.format("Checkwords for this specific master passphrase and index (no prefix): '%s'", checkwords(strseed0..dwords_to_chars(result))))
 			end
 
 			if show.hex then
