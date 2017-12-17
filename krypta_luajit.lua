@@ -2,7 +2,7 @@
 -- Krypta by fuka@fuxoft.cz
 -- https://github.com/fuxoft/krypta
 -- If you don't know exactly what all of this does, please don't use it, you could lose money.
-_G.VERSION = string.match([[*<= Version '20171217e' =>*]], "'(.*)'")
+_G.VERSION = string.match([[*<= Version '20171218a' =>*]], "'(.*)'")
 
 --[[
 	Set the SALT to something you can easily remember.
@@ -1594,9 +1594,13 @@ local function load_qr()
 		end
 	end
 
-	_M.render = function(data)
+	_M.render = function(data, leftmargin)
+		if not leftmargin then
+			leftmargin = 0
+		end
+		local margintxt = string.rep(" ", leftmargin)
 		if _M.opts.halfheight then
-			return _M.render_halfchars(data)
+			return _M.render_halfchars(data, margintxt)
 		end
 		local empty, full = " ", assert(_M.opts.character)
 		if _M.opts.doublewidth then
@@ -1613,7 +1617,7 @@ local function load_qr()
 		end
 		local result = {}
 		for rn, r in ipairs(ret) do
-			local row = {}
+			local row = {margintxt}
 			for i, num in ipairs(r) do
 				if num > 0 then
 					table.insert(row, full)
@@ -1626,7 +1630,8 @@ local function load_qr()
 		return table.concat(result, "\n")
 	end
 
-	_M.render_halfchars = function(data)
+	_M.render_halfchars = function(data, margintxt)
+		assert(margintxt)
 		local upper = "▀"
 		local lower = "▄"
 		local full = "█"
@@ -1645,7 +1650,7 @@ local function load_qr()
 		end
 		local result = {}
 		for rn = 1, #ret, 2 do
-			local row = {}
+			local row = {margintxt}
 			for i, num in ipairs(ret[rn]) do
 				local chr = "?"
 				if ret[rn+1][i] > 0 then
@@ -3121,7 +3126,7 @@ qr_invert
 						print(string.format("Specify the %s: prefix to display QR codes.", key))
 					else
 						print("--- Private key QR code:")
-						print(QR.render(privkeys[typ]))
+						print(QR.render(privkeys[typ], 4))
 						print("--- End of private key QR code")
 					end
 					if pubkey then
@@ -3129,7 +3134,7 @@ qr_invert
 						print(string.format("(%s:) Corresponding BTC address (%s): %s", key, typ, wif))
 						if prefix then
 							print("--- Public BTC address QR code:")
-							print(QR.render(wif))
+							print(QR.render(wif, 4))
 							print("--- End of public BTC address QR code")
 						end
 					else
