@@ -2,7 +2,7 @@
 -- Krypta by fuka@fuxoft.cz
 -- https://github.com/fuxoft/krypta
 -- If you don't know exactly what all of this does, please don't use it, you could lose money.
-_G.VERSION = string.match([[*<= Version '20171217d' =>*]], "'(.*)'")
+_G.VERSION = string.match([[*<= Version '20171217e' =>*]], "'(.*)'")
 
 --[[
 	Set the SALT to something you can easily remember.
@@ -2978,7 +2978,10 @@ qr_character=X
 	The "empty" pixel is always represented by space.
 
 qr_doublewidth
-	You have to use this option if your terminal has square 
+	Use this option to render every pixel as two characters.
+	Dumber alternative to "qr_halfheight". The resulting
+	QR code is twice as large (in both directions)
+	as with "qr_halfheight".
 
 qr_invert
 	Inverts the QR display so that full pixels become spaces and spaces become
