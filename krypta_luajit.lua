@@ -1488,7 +1488,7 @@ local function main()
 			local ichksum = sha256(strseed0..zeroes..dwords_to_chars(result)..zeroes.."index checksum", "dwords")
 			local chw1, chw2 = band(ichksum[1], 0x7ff), band(ichksum[2], 0x7ff)
 			if prefix then
-				print(string.format("Checkwords for this specific master passphrase, index and prefix (%s:): '%s'", prefix, checkwords(strseed0..dwords_to_chars(result)..prefix, 3)))
+				print(string.format("Checkwords for this specific master passphrase, prefix and index (%s:%s): '%s'", prefix, index, checkwords(strseed0..dwords_to_chars(result)..prefix, 3)))
 			else
 				print(string.format("Checkwords for this specific master passphrase and index (no prefix): '%s'", checkwords(strseed0..dwords_to_chars(result))))
 			end
