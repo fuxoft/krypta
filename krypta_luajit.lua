@@ -13,7 +13,7 @@ local DIFFICULTY = 0 --Put desired difficulty here
 local CHECKSUM = nil --Put three digit hex checksum here - for example 0x123
 local MAXDIFC = 31
 
-_G.VERSION = string.match([[*<= Version '20171217a' =>*]], "'(.*)'")
+_G.VERSION = string.match([[*<= Version '20171217b' =>*]], "'(.*)'")
 
 local bxor, band, bor, ror, rol, tohex, tobit, bnot, rshift, lshift = bit.bxor, bit.band, bit.bor, bit.ror, bit.rol, bit.tohex, bit.tobit, bit.bnot, bit.rshift, bit.lshift
 
@@ -1322,8 +1322,8 @@ local function test(opts)
 	assert(BIN_TO_ANY.convert(dwords_to_chars({0x12345678,0xffffffff}),"0123456789abcdef") == "12345678ffffffff")
 	assert(to_base58({0x80, 0x32247122, 0xF9FF8BB7, 0x8BBEFC55, 0x4E729121, 0x24410788, 0x2417AF0D, 0x77EB7A22, 0x784171F2, 0xAB079763}) == "5JCNQBno4UP562LCEXMTr72WVUe315rrXzPqAFiap8zQNjzarbL")
 	assert(checkwords("Homopes") == "devote asthma")
-	if opts.no_btc then
-		print("Skipping BTC tests.")
+	if opts.no_btc_addr then
+		print("Skipping BTC pubkey generation tests.")
 	else
 		BIGNUM.test()
 		local btckeys = btc_privkey(keymaster("Satan",1),"-")
@@ -1337,7 +1337,7 @@ local function test(opts)
 end
 
 local function parse_options()
-	local allowed = {"difficulty", "salt", "test", "checksum", "no_btc", "prefix"}
+	local allowed = {"difficulty", "salt", "test", "checksum", "no_btc_addr", "prefix"}
 	for i, opt in ipairs(allowed) do
 		allowed[opt] = true
 	end
@@ -1498,7 +1498,7 @@ local function main()
 				print("(hex:) With spaces: "..hex256(result," "))
 			end
 			local pubkey
-			if not opts.no_btc and (show.btcc or show.btcu) then
+			if not opts.no_btc_addr and (show.btcc or show.btcu) then
 				pubkey = privkey_to_pubkey("0x"..hex256(result))
 			end
 			local privkeys = btc_privkey(result)
@@ -1512,7 +1512,7 @@ local function main()
 					if pubkey then
 						print(string.format("(%s:) Corresponding BTC address (%s): %s", key, typ, wif(pubkey, typ)))
 					else
-						print("("..typ.." BTC address generation disabled by 'no_btc' user option)")
+						print("("..typ.." BTC address generation disabled by 'no_btc_addr' user option)")
 					end
 				end
 			end
