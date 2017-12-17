@@ -2,7 +2,7 @@
 -- Krypta by fuka@fuxoft.cz
 -- https://github.com/fuxoft/krypta
 -- If you don't know exactly what all of this does, please don't use it, you could lose money.
-_G.VERSION = string.match([[*<= Version '20171217c' =>*]], "'(.*)'")
+_G.VERSION = string.match([[*<= Version '20171217d' =>*]], "'(.*)'")
 
 --[[
 	Set the SALT to something you can easily remember.
