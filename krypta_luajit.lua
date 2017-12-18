@@ -2,7 +2,7 @@
 -- Krypta by fuka@fuxoft.cz
 -- https://github.com/fuxoft/krypta
 -- If you don't know exactly what all of this does, please don't use it, you could lose money.
-_G.VERSION = string.match([[*<= Version '20171218a' =>*]], "'(.*)'")
+_G.VERSION = string.match([[*<= Version '20171218b' =>*]], "'(.*)'")
 
 --[[
 	Set the SALT to something you can easily remember.
@@ -1547,9 +1547,9 @@ local function load_qr()
 			local opts = assert(_M.opts)
 			_M.init({character = "X", qr_doublewidth = true})
 			local pkey = "L4DDkHFfLaRfRuHLf2xNcVyytugJ6bVkvrxxECDpTajDLJA4mDG7"
-			assert(sha256(_M.render(pkey)) == "6052309da7ab5fd5d4435b8f855e1869fac6aa09387d6efb980236121b9d0046")
+			assert(sha256(_M.render(pkey, 0)) == "fb0adaa32092ac9c33e8e51dd1baacfdc655e0c79cdca28223b30fd40c7108a5", sha256(_M.render(pkey, 0)))
 			_M.init({qr_invert=true, qr_halfheight=true})
-			assert(sha256(_M.render(pkey)) == "637592469d6e20da78c42405052ff1ca5d244447b28d42dd18c5b5c22bc4cc8e")
+			assert(sha256(_M.render(pkey, 3)) == "5cd79252960ac3a668e2941353b8299284d3f394617ce0e248bea063ee6c0975", sha256(_M.render(pkey, 3)))
 			_M.opts = opts --Restore the old options values
 		end		
 	end
@@ -1557,6 +1557,14 @@ local function load_qr()
 	_M.qrcode = qrcode
 
 	local function pad(tab, num)
+		local function copy(lst)
+			local cp = {}
+			for i, num in ipairs(lst) do
+				cp[i] = num
+			end
+			return cp
+		end
+
 		for rn, r in ipairs(tab) do
 			table.insert(r, num)
 			table.insert(r, 1, num)
@@ -1565,8 +1573,8 @@ local function load_qr()
 		for i = 1, #tab[1] do
 			table.insert(er, num)
 		end
-		table.insert(tab, er)
-		table.insert(tab, 1, er)
+		table.insert(tab, copy(er))
+		table.insert(tab, 1, copy(er))
 		return tab
 	end
 
@@ -1595,26 +1603,30 @@ local function load_qr()
 	end
 
 	_M.render = function(data, leftmargin)
+		local ok, ret = _M.qrcode(data)
+		if not ok then
+			error(result)
+		end
+		ret = pad(ret, -2)
+		ret = pad(ret, -2)
+
 		if not leftmargin then
 			leftmargin = 0
 		end
 		local margintxt = string.rep(" ", leftmargin)
 		if _M.opts.halfheight then
-			return _M.render_halfchars(data, margintxt)
+			return _M.render_halfchars(ret, margintxt)
 		end
 		local empty, full = " ", assert(_M.opts.character)
+		if _M.opts.invert then
+			empty, full = full, empty
+		end
+		
 		if _M.opts.doublewidth then
 			empty = empty..empty
 			full = full..full
 		end
-		local ok, ret = _M.qrcode(data)
-		if _M.opts.invert then
-			empty, full = full, empty
-			ret = pad(ret, -2)
-		end
-		if not ok then
-			error(result)
-		end
+
 		local result = {}
 		for rn, r in ipairs(ret) do
 			local row = {margintxt}
@@ -1630,21 +1642,17 @@ local function load_qr()
 		return table.concat(result, "\n")
 	end
 
-	_M.render_halfchars = function(data, margintxt)
+	_M.render_halfchars = function(ret, margintxt)
 		assert(margintxt)
 		local upper = "▀"
 		local lower = "▄"
 		local full = "█"
 		local empty = " "
-		
-		local ok, ret = _M.qrcode(data)
-		if not ok then
-			error(result)
-		end
+
 		if _M.opts.invert then
 			empty, full, upper, lower = full, empty, lower, upper
-			ret = pad(ret, -2)			
 		end
+
 		if #ret % 2 ~= 0 then
 			table.insert(ret, ret[1])
 		end
@@ -2820,12 +2828,14 @@ local function test(opts)
 	assert(sha256("") == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
 	assert(sha256("The quick brown fox jumps over the lazy dog") == "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592")
 
-	if opts.test then
+	QR.test()
+	if opts.test then --Show test QR code
+		local dwords = sha256(os.time() .. tostring({}), "dwords")
 		local warn = "!!!!! DO NOT USE THIS PRIVATE KEY FOR ACTUAL BTC STORAGE !!!!!"
-		local pkey = "L4DDkHFfLaRfRuHLf2xNcVyytugJ6bVkvrxxECDpTajDLJA4mDG7"
+		local pkey = btc_privkey(dwords).compressed
 		print ("QR code of BTC private key "..pkey..":")
 		print (warn)
-		print (QR.render(pkey))
+		print (QR.render(pkey, 6))
 		print(warn)
 	end
 
@@ -2902,7 +2912,7 @@ end
 
 local function main()
 	_G.BIGNUM = load_bignum()
-	_G.QR = load_qr()	
+	_G.QR = load_qr()
 	_G.BIN_TO_ANY = bin_to_any_module()
 	print("KRYPTA by Fuxoft, version ".._G.VERSION)
 	local opts = parse_options()
@@ -2916,6 +2926,8 @@ local function main()
 		end
 	end
 
+	QR.init(opts)
+	
 	if opts.test then
 		test(opts)
 		os.exit()
@@ -3016,7 +3028,6 @@ qr_invert
 
 	print("STARTING!")
 	test(opts)
-	QR.init(opts)
 	print("SALT='"..SALT.."' ("..#SALT.." characters)")
 	assert(type(SALT) == "string", "SALT is not string")
 	if #SALT == 0 then
