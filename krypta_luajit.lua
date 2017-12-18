@@ -2,7 +2,7 @@
 -- Krypta by fuka@fuxoft.cz
 -- https://github.com/fuxoft/krypta
 -- If you don't know exactly what all of this does, please don't use it, you could lose money.
-_G.VERSION = string.match([[*<= Version '20171218b' =>*]], "'(.*)'")
+_G.VERSION = string.match([[*<= Version '20171218e' =>*]], "'(.*)'")
 
 --[[
 	Set the SALT to something you can easily remember.
@@ -14,9 +14,10 @@ _G.VERSION = string.match([[*<= Version '20171218b' =>*]], "'(.*)'")
 local SALT = "" --Put the SALT between the quotes.
 local DIFFICULTY = 0 --Put desired difficulty here
 local CHECKSUM = nil --Put three digit hex checksum here - for example 0x123
-local MAXDIFC = 31
 
 local bxor, band, bor, ror, rol, tohex, tobit, bnot, rshift, lshift = bit.bxor, bit.band, bit.bor, bit.ror, bit.rol, bit.tohex, bit.tobit, bit.bnot, bit.rshift, bit.lshift
+
+local MAXDIFC = 31
 
 local function hex256(dwords, separator)
 	assert(#dwords == 8)
@@ -1547,9 +1548,9 @@ local function load_qr()
 			local opts = assert(_M.opts)
 			_M.init({character = "X", qr_doublewidth = true})
 			local pkey = "L4DDkHFfLaRfRuHLf2xNcVyytugJ6bVkvrxxECDpTajDLJA4mDG7"
-			assert(sha256(_M.render(pkey, 0)) == "fb0adaa32092ac9c33e8e51dd1baacfdc655e0c79cdca28223b30fd40c7108a5", sha256(_M.render(pkey, 0)))
+			assert(sha256(_M.render(pkey, 0)) == "d44e5cbaf7ee0e9ad1e34b48fd435a40f586ca4af18d59ef42f4f2992fae64f5", sha256(_M.render(pkey, 0)))
 			_M.init({qr_invert=true, qr_halfheight=true})
-			assert(sha256(_M.render(pkey, 3)) == "5cd79252960ac3a668e2941353b8299284d3f394617ce0e248bea063ee6c0975", sha256(_M.render(pkey, 3)))
+			assert(sha256(_M.render(pkey, 3)) == "1562cc34d97e1cbb362ec86b65d75cc5658b5fefeefe033ba3f6637b426548a2", sha256(_M.render(pkey, 3)))
 			_M.opts = opts --Restore the old options values
 		end		
 	end
@@ -1607,6 +1608,15 @@ local function load_qr()
 		if not ok then
 			error(result)
 		end
+
+		for i = 1, #ret do --Mirror it
+			for j = 1, i do
+				ret[i][j], ret[j][i] = ret[j][i], ret[i][j]
+			end
+		end
+
+		ret = pad(ret, -2)
+		ret = pad(ret, -2)
 		ret = pad(ret, -2)
 		ret = pad(ret, -2)
 
