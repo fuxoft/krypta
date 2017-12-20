@@ -24,6 +24,8 @@ For each Index, you get full set of security data, e.g. long password, short pas
 
 In addition, all Master key / Index combinations generate two "Check words", and all Master key / Prefix / Index combinations generate three "Check words". You can use these as a checksum of sorts.
 
+Note that different Prefixes for the same Index are intentionally closely related to each other! E.g. whoever has the pwd40 password for index XYZ can easily deduce the pwd15 password or the BIP39 wordlist for the same Index. You are not supposed to use two prefixes of the same Index for two different purposes!
+
 At this time, you might be overwhelmed by all this information and you might think that you can never remember all of this. But you don't have to!
 
 The only thing you absolutely, positively have to remember, is your Passphrase. Everything else, i.e. Salt, Master key checksum, Indexes, Prefixes, Check words, can be stored in a text file which you don't have to be extremely paranoid about (of course it IS better if no one else sees it).
