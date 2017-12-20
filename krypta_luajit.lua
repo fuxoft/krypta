@@ -2,7 +2,7 @@
 -- Krypta by fuka@fuxoft.cz
 -- https://github.com/fuxoft/krypta
 -- If you don't know exactly what all of this does, please don't use it, you could lose money.
-_G.VERSION = string.match([[*<= Version '20171218e' =>*]], "'(.*)'")
+_G.VERSION = string.match([[*<= Version '20171220a' =>*]], "'(.*)'")
 
 --[[
 	Set the SALT to something you can easily remember.
@@ -2960,10 +2960,12 @@ local function main()
 	if DIFFICULTY == 0 then
 		print[[
 To run Krypta, you must supply at least the 'difficulty' option.
+For detailed documentation, visit https://github.com/fuxoft/krypta
+
 All available options with examples:
 
 test
-	Do all self tests, print a test QR code and quit.
+	Do all self tests, print a test QR code (of random BTC private key) and quit.
 
 difficulty=5
 	Select the difficulty for master key generation (1 to 31).
@@ -2979,17 +2981,19 @@ checksum=0x123
 	Specify checksum for your master passphrase (0x and three hex digits).
 	Useful to be sure that you entered the passphrase correctly.
 	Using it degrades you security a tiny little bit because if the attacker
-	knows it, he can check if his master passphrase and difficulty guess
+	knows it, he can easily check if his master passphrase and difficulty guess
 	is correct or not.
 
 salt=00420777123456
 	Specify salt which is combined with your passphrase to generate master key.
 	Note that having passphrase "abc" and salt "def" is not the same thing
-	as having passphrase "abcdef" (or "defabc") and no salt.
+	as having passphrase "abcdef" (or "defabc") without salt.
 
 no_btc_addr
 	Disables generating BTC addresses (and saves a few seconds of time).
 	Note that BTC private keys generation is still enabled because it's fast.
+	The BTC address generation algorithm is currently very naive and rather slow.
+	It can be significantly improved.
 
 prefix=pwd12
 	Automatically sets default prefix. Entering "xyz" as an index then
@@ -2997,8 +3001,8 @@ prefix=pwd12
 	all prefixes (the same result as entering index "xyz" when no default
 	prefix is set).
 
-The following options are for QR code generation for BTC keys
-and addresses. Use the "test" option to experiment with warious QR code options.
+The following options are for QR code generation for BTC private keys
+and addresses. Use the "test" option to experiment with various QR code options.
 If you have recent sane computer, you will probably want to use both "qr_inverse"
 and "qr_halfheight" options.
 	
