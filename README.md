@@ -42,7 +42,7 @@ Facebook password: pwd40:Facebook, checkwords "penalty party ritual"
 Mycelium wordlist: wrd24:Mycelium, checkwords "enlist enjoy midnight"
 ```
 
-IMPORTANT: Do you see something wrong with this? The Passphrase hint in this specific example is UNSAFE and makes you much easier target for someone who sees this hint! Someone can quite easily write a script that downloads song lytrics afrom some online database, converts the second verse to CamelCase, feeds it to Krypta and repeats this for all existing songs until he finds a Master key with checksum 0x89A, at which point you are completely screwed. It's all about balance of security and ease of remembering. Do your homework.
+IMPORTANT: Do you see something wrong with this? The Passphrase hint in this specific example is UNSAFE and makes you much easier target for someone who sees this hint! Someone can quite easily write a script that downloads song lyrics from some online database, converts the second verse to CamelCase, feeds it to Krypta and repeats this for all existing songs until he finds a Master key with checksum 0x89A, at which point you are completely screwed. It's all about balance of security and ease of remembering. Do your homework.
 
 You can keep copies of this file in Dropbox, Google Drive and your desk drawer. Don't forget to update all copies when you update the file (e.g. add new Indexes). The Check words written down like this are a good way to immediately see if you entered something wrong somewhere. Check words, Prefixes and Indexes are totally safe to be made public and cannot be traced back to your Master key.
 
