@@ -2,7 +2,7 @@
 -- Krypta by fuka@fuxoft.cz
 -- https://github.com/fuxoft/krypta
 -- If you don't know exactly what all of this does, please don't use it, you could lose money.
-_G.VERSION = string.match([[*<= Version '20180104a' =>*]], "'(.*)'")
+_G.VERSION = string.match([[*<= Version '20180406b' =>*]], "'(.*)'")
 
 --[[
 	Set the SALT to something you can easily remember.
@@ -2900,7 +2900,7 @@ local function parse_options()
 	for i, arg in ipairs(arg) do
 		if arg:match("=") then
 			local opt, val = arg:match("(.-)=(.+)")
-			assert(opt and val)
+			assert(opt and val, "Invalid option syntax: "..arg)
 			assert(#opt > 0)
 			assert(#val > 0)
 			opts[opt] = val
