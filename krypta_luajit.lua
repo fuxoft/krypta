@@ -2,7 +2,7 @@
 -- Krypta by fuka@fuxoft.cz
 -- https://github.com/fuxoft/krypta
 -- If you don't know exactly what all of this does, please don't use it, you could lose money.
-_G.VERSION = string.match([[*<= Version '20180406b' =>*]], "'(.*)'")
+_G.VERSION = string.match([[*<= Version '20190113a' =>*]], "'(.*)'")
 
 --[[
 	Set the SALT to something you can easily remember.
@@ -3003,7 +3003,7 @@ prefix=pwd12
 
 The following options are for QR code generation for BTC private keys
 and addresses. Use the "test" option to experiment with various QR code options.
-If you have recent sane computer, you will probably want to use both "qr_inverse"
+If you have recent sane computer, you will probably want to use both "qr_invert"
 and "qr_halfheight" options.
 	
 qr_halfheight
